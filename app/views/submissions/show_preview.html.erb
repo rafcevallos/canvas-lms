@@ -60,6 +60,7 @@
     </div>
   </div>
 <% elsif @submission.submission_type == "online_url" %>
+  <iframe width="100%" style="height: 90vh;" src=<%= @submission.url %>></iframe>
   <div style="text-align: center; width: 500px; margin: 10px auto; font-size: 0.8em;">
     <% image = @submission.attachment if @submission.processed? %>
     <%= t('external_url_submission', 'This submission was a URL to an external page.') %>
@@ -68,11 +69,11 @@
     <% else %>
       <%= t('entry_no_image', 'Keep in mind that this page may have changed since the submission originally occurred.') %>
     <% end %>
-    <div style="font-size: 1.4em; margin: 10px;">
+    <!-- <div style="font-size: 1.4em; margin: 10px;">
       <%= link_to @submission.url,
                   @submission.url,
                   class: "not_external" %>
-    </div>
+    </div> -->
     <div style="font-size: 1.4em; margin: 10px;">
       <%= link_to t('view_in_a_new_tab', '(View in a new tab)'),
                   @submission.url,
