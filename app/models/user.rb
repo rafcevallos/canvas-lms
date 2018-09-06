@@ -1032,6 +1032,9 @@ class User < ActiveRecord::Base
     given { |user| self.check_courses_right?(user, :read_reports) }
     can :read_profile and can :remove_avatar and can :read_reports
 
+    given { |user| user.teacher_enrollments.length > 0 }
+    can :manage_user_details and can :create and can :update
+
     given { |user| self.check_courses_right?(user, :manage_user_notes) }
     can :create_user_notes and can :read_user_notes
 
