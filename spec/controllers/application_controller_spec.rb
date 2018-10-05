@@ -16,14 +16,19 @@
 # with this program. If not, see <http://www.gnu.org/licenses/>.
 #
 
-require File.expand_path(File.dirname(__FILE__) + '/../sharding_spec_helper')
+require_relative '../spec_helper'
+require_relative '../lti_1_3_spec_helper'
 
-describe ApplicationController do
-
+RSpec.describe ApplicationController do
   before :each do
-    allow(controller).to receive(:request).and_return(double(:host_with_port => "www.example.com",
-                                            :host => "www.example.com",
-                                            :headers => {}, :format => double(:html? => true)))
+    request_double = double(
+      host_with_port: "www.example.com",
+      host: "www.example.com",
+      headers: {},
+      format: double(:html? => true),
+      user_agent: nil
+    )
+    allow(controller).to receive(:request).and_return(request_double)
   end
 
   describe "#google_drive_connection" do
@@ -45,7 +50,9 @@ describe ApplicationController do
 
       expect(GoogleDrive::Connection).to receive(:new).with("real_current_user_token", "real_current_user_secret", 30)
 
-      controller.send(:google_drive_connection)
+      Setting.skip_cache do
+        controller.send(:google_drive_connection)
+      end
     end
 
     it "uses @current_user second" do
@@ -58,7 +65,9 @@ describe ApplicationController do
       expect(Rails.cache).to receive(:fetch).with(['google_drive_tokens', mock_current_user].cache_key).and_return(["current_user_token", "current_user_secret"])
 
       expect(GoogleDrive::Connection).to receive(:new).with("current_user_token", "current_user_secret", 30)
-      controller.send(:google_drive_connection)
+      Setting.skip_cache do
+        controller.send(:google_drive_connection)
+      end
     end
 
     it "queries user services if token isn't in the cache" do
@@ -73,7 +82,9 @@ describe ApplicationController do
       expect(mock_user_services).to receive(:where).with(service: "google_drive").and_return(double(first: double(token: "user_service_token", secret: "user_service_secret")))
 
       expect(GoogleDrive::Connection).to receive(:new).with("user_service_token", "user_service_secret", 30)
-      controller.send(:google_drive_connection)
+      Setting.skip_cache do
+        controller.send(:google_drive_connection)
+      end
     end
 
     it "uses the session values if no users are set" do
@@ -128,6 +139,12 @@ describe ApplicationController do
       expect { controller.js_env(:REAL_SLIM_SHADY => 'poser') }.to raise_error("js_env key REAL_SLIM_SHADY is already taken")
     end
 
+    it "should overwrite a key if told explicitly to do so" do
+      controller.js_env :REAL_SLIM_SHADY => 'please stand up'
+      controller.js_env({:REAL_SLIM_SHADY => 'poser'}, true)
+      expect(controller.js_env[:REAL_SLIM_SHADY]).to eq 'poser'
+    end
+
     it 'gets appropriate settings from the root account' do
       root_account = double(global_id: 1, feature_enabled?: false, open_registration?: true, settings: {})
       allow(HostUrl).to receive_messages(file_host: 'files.example.com')
@@ -136,16 +153,30 @@ describe ApplicationController do
     end
 
     it 'sets LTI_LAUNCH_FRAME_ALLOWANCES' do
-      expect(@controller.js_env[:LTI_LAUNCH_FRAME_ALLOWANCES]).to eq Lti::Launch::FRAME_ALLOWANCES
+      expect(@controller.js_env[:LTI_LAUNCH_FRAME_ALLOWANCES]).to match_array [
+        "geolocation *",
+        "microphone *",
+        "camera *",
+        "midi *",
+        "encrypted-media *"
+      ]
     end
 
     context "sharding" do
+      require_relative '../sharding_spec_helper'
       specs_require_sharding
 
       it "should set the global id for the domain_root_account" do
         controller.instance_variable_set(:@domain_root_account, Account.default)
         expect(controller.js_env[:DOMAIN_ROOT_ACCOUNT_ID]).to eq Account.default.global_id
       end
+    end
+
+    it 'matches against weird http_accept headers' do
+      # sometimes we get browser requests for an endpoint that just pass */* as
+      # the accept header. I don't think we can simulate this in a test, so
+      # this test just verifies the condition in js_env works across updates
+      expect(Mime::Type.new("*/*") == "*/*").to be_truthy
     end
   end
 
@@ -213,12 +244,7 @@ describe ApplicationController do
       # safe_domain_file_url wants to use request.protocol
       allow(controller).to receive(:request).and_return(double(:protocol => '', :host_with_port => ''))
 
-      @common_params = {
-        :user_id => nil,
-        :ts => nil,
-        :sf_verifier => nil,
-        :only_path => true
-      }
+      @common_params = { :only_path => true }
     end
 
     it "should include inline=1 in url by default" do
@@ -332,6 +358,7 @@ describe ApplicationController do
 
   describe 'rescue_action_in_public' do
     context 'sharding' do
+      require_relative '../sharding_spec_helper'
       specs_require_sharding
 
       before do
@@ -470,16 +497,31 @@ describe ApplicationController do
           content_tag.update_attributes!(context: assignment_model)
         end
 
+        context 'display_type == "full_width' do
+          before do
+            tool.settings[:assignment_selection] = { "display_type" => "full_width" }
+            tool.save!
+          end
+
+          it 'uses the tool setting display type if the "display" parameter is absent' do
+            expect(Lti::AppUtil).to receive(:display_template).with('full_width')
+            controller.send(:content_tag_redirect, course, content_tag, nil)
+          end
+
+          it 'does not use the assignment lti header' do
+            controller.send(:content_tag_redirect, course, content_tag, nil)
+            expect(assigns[:prepend_template]).to be_blank
+          end
+
+          it 'does not display the assignment edit sidebar' do
+            controller.send(:content_tag_redirect, course, content_tag, nil)
+            expect(assigns[:append_template]).to_not be_present
+          end
+        end
+
         it 'gives priority to the "display" parameter' do
           expect(Lti::AppUtil).to receive(:display_template).with('borderless')
           controller.params['display'] = 'borderless'
-          controller.send(:content_tag_redirect, course, content_tag, nil)
-        end
-
-        it 'uses the tool setting display type if the "display" parameter is absent' do
-          expect(Lti::AppUtil).to receive(:display_template).with('full_width')
-          tool.settings[:assignment_selection] = { "display_type" => "full_width" }
-          tool.save!
           controller.send(:content_tag_redirect, course, content_tag, nil)
         end
 
@@ -491,16 +533,67 @@ describe ApplicationController do
           end.not_to raise_exception
         end
 
-        it 'does not use the assignment lti header if the display type is "full_width"' do
-          tool.settings[:assignment_selection] = { "display_type" => "full_width" }
-          tool.save!
-          controller.send(:content_tag_redirect, course, content_tag, nil)
-          expect(assigns[:prepend_template]).to be_blank
-        end
-
         it 'does display the assignment lti header if the display type is not "full_width"' do
           controller.send(:content_tag_redirect, course, content_tag, nil)
           expect(assigns[:prepend_template]).to be_present
+        end
+
+        it 'does display the assignment edit sidebar if display type is not "full_width"' do
+          controller.send(:content_tag_redirect, course, content_tag, nil)
+          expect(assigns[:append_template]).to be_present
+        end
+      end
+
+      context 'lti version' do
+        let(:user) { User.new }
+
+        before do
+          allow(controller).to receive(:named_context_url).and_return('wrong_url')
+          allow(controller).to receive(:lti_grade_passback_api_url).and_return('wrong_url')
+          allow(controller).to receive(:blti_legacy_grade_passback_api_url).and_return('wrong_url')
+          allow(controller).to receive(:lti_turnitin_outcomes_placement_url).and_return('wrong_url')
+
+          allow(controller).to receive(:render)
+          allow(controller).to receive_messages(js_env:[])
+          controller.instance_variable_set(:"@context", course)
+          allow(content_tag).to receive(:id).and_return(42)
+          allow(controller).to receive(:require_user) { user_model }
+          controller.instance_variable_set(:@current_user, user)
+          controller.instance_variable_set(:@domain_root_account, course.account)
+          content_tag.update_attributes!(context: assignment_model)
+        end
+
+        describe 'LTI 1.3' do
+          let_once(:developer_key) { DeveloperKey.create! }
+          include_context 'lti_1_3_spec_helper'
+
+          before do
+            tool.developer_key = developer_key
+            tool.settings['use_1_3'] = true
+            tool.save!
+          end
+
+          context 'assignments' do
+            it 'creates a resource link request when tool is configured to use LTI 1.3' do
+              controller.send(:content_tag_redirect, course, content_tag, nil)
+              jwt = JSON::JWT.decode(assigns[:lti_launch].params[:id_token], :skip_verification)
+              expect(jwt["https://purl.imsglobal.org/spec/lti/claim/message_type"]).to eq "LtiResourceLinkRequest"
+            end
+          end
+
+          context 'module items' do
+            it 'creates a resource link request when tool is configured to use LTI 1.3' do
+              content_tag.update!(context: course.account)
+              controller.send(:content_tag_redirect, course, content_tag, nil)
+              jwt = JSON::JWT.decode(assigns[:lti_launch].params[:id_token], :skip_verification)
+              expect(jwt["https://purl.imsglobal.org/spec/lti/claim/message_type"]).to eq "LtiResourceLinkRequest"
+            end
+          end
+        end
+
+        it 'creates a basic lti launch request when tool is not configured to use LTI 1.3' do
+          controller.send(:content_tag_redirect, course, content_tag, nil)
+          expect(assigns[:lti_launch].params["lti_message_type"]).to eq "basic-lti-launch-request"
         end
       end
 
@@ -755,6 +848,7 @@ describe ApplicationController do
     end
 
     context "sharding" do
+      require_relative '../sharding_spec_helper'
       specs_require_sharding
 
       it "should not asplode with cross-shard groups" do
@@ -770,6 +864,22 @@ describe ApplicationController do
         end
         controller.send(:get_all_pertinent_contexts, include_groups: true, only_contexts: "group_#{@other_group.id},group_#{@group.id}")
         expect(controller.instance_variable_get(:@contexts).select{|c| c.is_a?(Group)}).to eq [@group]
+      end
+
+      it "should not include groups in courses the user doesn't have the ability to view yet" do
+        user_factory(active_all: true)
+        controller.instance_variable_set(:@context, @user)
+
+        course_factory
+        student_in_course(:user => @user, :course => @course)
+        expect(@course).to_not be_available
+        expect(@user.cached_current_enrollments).to be_empty
+        @other_group = group_model(:context => @course)
+        group_model(:context => @course)
+        @group.add_user(@user)
+
+        controller.send(:get_all_pertinent_contexts, include_groups: true)
+        expect(controller.instance_variable_get(:@contexts).select{|c| c.is_a?(Group)}).to be_empty
       end
 
       it 'must select all cross-shard courses the user belongs to' do
@@ -1063,11 +1173,12 @@ describe CoursesController do
   describe "set_js_wiki_data" do
     before :each do
       course_with_teacher_logged_in :active_all => true
+      @course.wiki_pages.create!(:title => 'blah').set_as_front_page!
+      @course.reload
       @course.default_view = "wiki"
       @course.show_announcements_on_home_page = true
       @course.home_page_announcement_limit = 5
       @course.save!
-      @course.wiki_pages.create!(:title => 'blah').set_as_front_page!
     end
 
     it "should populate js_env with course_home setting" do
@@ -1135,6 +1246,194 @@ describe CoursesController do
       expect(data['is_master_course_child_content']).to be_truthy
       expect(data['restricted_by_master_course']).to be_truthy
       expect(data['master_course_restrictions']).to eq({:content => true})
+    end
+  end
+
+  context 'validate_scopes' do
+    let(:account_with_feature_enabled) do
+      account = double()
+      allow(account).to receive(:feature_enabled?).with(:developer_key_management_and_scoping).and_return(true)
+      account
+    end
+
+    let(:account_with_feature_disabled) do
+      account = double()
+      allow(account).to receive(:feature_enabled?).with(:developer_key_management_and_scoping).and_return(false)
+      account
+    end
+
+    context 'developer_key_management_and_scoping feature enabled' do
+      before do
+        controller.instance_variable_set(:@domain_root_account, account_with_feature_enabled)
+      end
+
+      it 'does not affect session based api requests' do
+        allow(controller).to receive(:request).and_return(double({
+          params: {}
+        }))
+        expect(controller.send(:validate_scopes)).to be_nil
+      end
+
+      it 'does not affect api requests that use an access token with an unscoped developer key' do
+        user = user_model
+        developer_key = DeveloperKey.create!
+        token = AccessToken.create!(user: user, developer_key: developer_key)
+        controller.instance_variable_set(:@access_token, token)
+        allow(controller).to receive(:request).and_return(double({
+          params: {},
+          method: 'GET'
+        }))
+        expect(controller.send(:validate_scopes)).to be_nil
+      end
+
+      it 'raises AccessTokenScopeError if scopes do not match' do
+        user = user_model
+        developer_key = DeveloperKey.create!(require_scopes: true)
+        token = AccessToken.create!(user: user, developer_key: developer_key)
+        controller.instance_variable_set(:@access_token, token)
+        allow(controller).to receive(:request).and_return(double({
+          params: {},
+          method: 'GET'
+        }))
+        expect { controller.send(:validate_scopes) }.to raise_error(AuthenticationMethods::AccessTokenScopeError)
+      end
+
+      it 'allows adequately scoped requests through' do
+        user = user_model
+        developer_key = DeveloperKey.create!(require_scopes: true)
+        token = AccessToken.create!(user: user, developer_key: developer_key, scopes: ['url:GET|/api/v1/accounts'])
+        controller.instance_variable_set(:@access_token, token)
+        allow(controller).to receive(:request).and_return(double({
+          params: {},
+          method: 'GET',
+          path: '/api/v1/accounts'
+        }))
+        expect(controller.send(:validate_scopes)).to be_nil
+      end
+
+      it 'allows HEAD requests' do
+        user = user_model
+        developer_key = DeveloperKey.create!(require_scopes: true)
+        token = AccessToken.create!(user: user, developer_key: developer_key, scopes: ['url:GET|/api/v1/accounts'])
+        controller.instance_variable_set(:@access_token, token)
+        allow(controller).to receive(:request).and_return(double({
+          params: {},
+          method: 'HEAD',
+          path: '/api/v1/accounts'
+        }))
+        expect(controller.send(:validate_scopes)).to be_nil
+      end
+
+      it 'strips includes for adequately scoped requests' do
+        user = user_model
+        developer_key = DeveloperKey.create!(require_scopes: true)
+        token = AccessToken.create!(user: user, developer_key: developer_key, scopes: ['url:GET|/api/v1/accounts'])
+        controller.instance_variable_set(:@access_token, token)
+        allow(controller).to receive(:request).and_return(double({
+          method: 'GET',
+          path: '/api/v1/accounts'
+        }))
+        params = double()
+        expect(params).to receive(:delete).with(:include)
+        expect(params).to receive(:delete).with(:includes)
+        allow(controller).to receive(:params).and_return(params)
+        controller.send(:validate_scopes)
+      end
+    end
+
+    context 'developer_key_management_and_scoping feature disabled' do
+      before do
+        controller.instance_variable_set(:@domain_root_account, account_with_feature_disabled)
+      end
+
+      after do
+        controller.instance_variable_set(:@domain_root_account, nil)
+      end
+
+      it "does nothing" do
+        expect(controller).not_to receive(:api_request?)
+        controller.send(:validate_scopes)
+      end
+    end
+  end
+end
+
+RSpec.describe ApplicationController, '#render_unauthorized_action' do
+  controller do
+    def index
+      render_unauthorized_action
+    end
+  end
+
+  before :once do
+    @teacher = course_with_teacher(active_all: true).user
+  end
+
+  before do
+    user_session(@teacher)
+    get :index, format: format
+  end
+
+  describe 'pdf format' do
+    let(:format) { :pdf }
+
+    specify { expect(response.headers.fetch('Content-Type')).to match(/\Atext\/html/) }
+    specify { expect(response).to have_http_status :unauthorized }
+    specify { expect(response).to render_template('shared/unauthorized') }
+  end
+
+  describe 'html format' do
+    let(:format) { :html }
+
+    specify { expect(response.headers.fetch('Content-Type')).to match(/\Atext\/html/) }
+    specify { expect(response).to have_http_status :unauthorized }
+    specify { expect(response).to render_template('shared/unauthorized') }
+  end
+
+  describe 'json format' do
+    let(:format) { :json }
+
+    specify { expect(response.headers['Content-Type']).to match(/\Aapplication\/json/) }
+    specify { expect(response).to have_http_status :unauthorized }
+    specify { expect(json_parse.fetch('status')).to eq 'unauthorized' }
+  end
+end
+
+RSpec.describe ApplicationController, '#redirect_to_login' do
+  controller do
+    def index
+      redirect_to_login
+    end
+  end
+
+  before do
+    get :index, format: format
+  end
+
+  context 'given an unauthenticated json request' do
+    let(:format) { :json }
+
+    specify { expect(response).to have_http_status :unauthorized }
+    specify { expect(json_parse.fetch('status')).to eq 'unauthenticated' }
+  end
+
+  shared_examples 'redirectable to html login page' do
+    specify { expect(flash[:warning]).to eq 'You must be logged in to access this page' }
+    specify { expect(session[:return_to]).to eq controller.clean_return_to(request.fullpath) }
+    specify { expect(response).to redirect_to login_url }
+    specify { expect(response).to have_http_status :found }
+    specify { expect(response.location).to eq login_url }
+  end
+
+  context 'given an unauthenticated html request' do
+    it_behaves_like 'redirectable to html login page' do
+      let(:format) { :html }
+    end
+  end
+
+  context 'given an unauthenticated pdf request' do
+    it_behaves_like 'redirectable to html login page' do
+      let(:format) { :pdf }
     end
   end
 end

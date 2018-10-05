@@ -18,7 +18,7 @@
 require_relative '../common'
 
 module GradebookCommon
-  shared_context 'reusable_course' do
+  shared_context 'reusable_gradebook_course' do
     let(:test_course)       { course_factory(active_course: true) }
     let(:teacher)           { user_factory(active_all: true) }
     let(:student)           { user_factory(active_all: true) }
@@ -122,16 +122,6 @@ module GradebookCommon
     set_value(grade_input, grade)
     grade_input.send_keys(:return)
     wait_for_ajaximations
-  end
-
-  def open_comment_dialog(x=0, y=0)
-    cell = f("#gradebook_grid .container_1 .slick-row:nth-child(#{y+1}) .slick-cell:nth-child(#{x+1})")
-    hover cell
-    fj('.gradebook-cell-comment:visible', cell).click
-    # the dialog fetches the comments async after it displays and then innerHTMLs the whole
-    # thing again once it has fetched them from the server, completely replacing it
-    wait_for_ajax_requests
-    fj('.submission_details_dialog:visible')
   end
 
   def final_score_for_row(row)

@@ -25,25 +25,24 @@ module SIS
 
       yield importer
 
-      if @batch
-        types = {
-          'user' => {scope: @root_account.pseudonyms},
-          'course' => {scope: @root_account.all_courses},
-          'section' => {scope: @root_account.course_sections},
-          'term' => {scope: @root_account.enrollment_terms},
-          'account' => {scope: @root_account.all_accounts},
-          'group' => {scope: @root_account.all_groups}
-        }
+      types = {
+        'user' => {scope: @root_account.pseudonyms},
+        'course' => {scope: @root_account.all_courses},
+        'section' => {scope: @root_account.course_sections},
+        'term' => {scope: @root_account.enrollment_terms},
+        'account' => {scope: @root_account.all_accounts},
+        'group' => {scope: @root_account.all_groups},
+        'group_category' => {scope: @root_account.all_group_categories},
+      }
 
-        importer.things_to_update_batch_ids.each do |key, value|
-          value.to_a.in_groups_of(1000, false) do |batch|
-            touch_and_update_batch_ids types[key][:scope].where(id: batch)
-          end
+      importer.things_to_update_batch_ids.each do |key, value|
+        value.to_a.in_groups_of(1000, false) do |batch|
+          touch_and_update_batch_ids types[key][:scope].where(id: batch)
         end
-
-        @logger.debug("change sis id #{Time.zone.now - start} seconds")
-
       end
+
+      @logger.debug("change sis id #{Time.zone.now - start} seconds")
+
       importer.success_count
     end
 
@@ -79,7 +78,8 @@ module SIS
           'section' => {scope: @root_account.course_sections},
           'term' => {scope: @root_account.enrollment_terms},
           'account' => {scope: @root_account.all_accounts},
-          'group' => {scope: @root_account.all_groups}
+          'group' => {scope: @root_account.all_groups},
+          'group_category' => {scope: @root_account.all_group_categories},
         }
 
         details = types[type]
@@ -108,6 +108,9 @@ module SIS
       end
 
       def check_for_conflicting_ids(column, details, type, data_change)
+        if type == 'group_category' && (data_change.old_integration_id || data_change.new_integration_id)
+          raise ImportError, "Group categories should not have integration IDs."
+        end
         check_new = details[:scope].where(column => data_change.new_id).exists? if data_change.new_id.present?
         raise ImportError, "A new_id, '#{data_change.new_id}', referenced an existing #{type} and the #{type} with #{column} '#{data_change.old_id}' was not updated" if check_new
         check_int = details[:scope].where(integration_id: data_change.new_integration_id).exists? if data_change.new_integration_id.present?

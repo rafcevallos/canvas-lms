@@ -75,7 +75,7 @@ describe GroupsController do
       g2 = @course.groups.create(:name => "some other group", :group_category => category1)
       g3 = @course.groups.create(:name => "some third group", :group_category => category2)
       get 'index', params: {:course_id => @course.id}
-      expect(response).to be_success
+      expect(response).to be_successful
       expect(assigns[:groups]).not_to be_empty
       expect(assigns[:groups].length).to eql(3)
       expect(assigns[:groups] - [g1,g2,g3]).to be_empty
@@ -100,7 +100,7 @@ describe GroupsController do
       groups << @course.groups.create(:name => "4.5", :group_category => category3)
       groups.each {|g| g.add_user @student, 'accepted' }
       get 'index', params: {:course_id => @course.id, :per_page => 50}, format: 'json'
-      expect(response).to be_success
+      expect(response).to be_successful
       expect(assigns[:paginated_groups]).not_to be_empty
       expect(assigns[:paginated_groups].length).to eql(9)
       #Check group category ordering
@@ -137,8 +137,7 @@ describe GroupsController do
       user_session(student1)
       get 'index', params: {:course_id => @course.id, :include => 'users',
         :include_inactive_users => true}, format: :json
-      response_body = response.body.sub('while(1);', '')
-      parsed_json = JSON.parse response_body
+      parsed_json = json_parse(response.body)
       expect(parsed_json.length).to eq 1
       users_json = parsed_json.first["users"]
       expect(users_json).not_to be_nil
@@ -147,7 +146,7 @@ describe GroupsController do
       expect(ids_json).to eq [student1.id, student2.id].to_set
       names_json = users_json.map { |u| u["name"] }.to_set
       expect(names_json).to eq [student1.name, student2.name].to_set
-      expect(response).to be_success
+      expect(response).to be_successful
     end
   end
 
@@ -235,7 +234,7 @@ describe GroupsController do
       user_session(@user)
       @group.add_user(@user)
       get 'show', params: {:id => @group.id}
-      expect(response).to be_success
+      expect(response).to be_successful
       expect(assigns[:group]).to eql(@group)
       expect(assigns[:context]).to eql(@group)
       expect(assigns[:stream_items]).to eql([])
@@ -295,7 +294,7 @@ describe GroupsController do
 
       get 'show', params: {:id => group.id}
 
-      expect(response).to be_success
+      expect(response).to be_successful
       expect(assigns[:group]).to eql(group)
     end
   end
@@ -320,7 +319,7 @@ describe GroupsController do
       @group = @course.groups.create!(:name => "PG 1", :group_category => @category)
       @user = user_factory(active_all: true)
       post 'add_user', params: {:group_id => @group.id, :user_id => @user.id}
-      expect(response).to be_success
+      expect(response).to be_successful
       expect(assigns[:membership]).not_to be_nil
       expect(assigns[:membership].user).to eql(@user)
     end
@@ -338,7 +337,7 @@ describe GroupsController do
       group.add_user(user1)
 
       post 'add_user', params: {:group_id => group.id, :user_id => user2.id}
-      expect(response).not_to be_success
+      expect(response).not_to be_successful
       expect(assigns[:membership]).not_to be_nil
       expect(assigns[:membership].user).to eql(user2)
       expect(assigns[:membership].errors[:user_id]).not_to be_nil
@@ -359,7 +358,7 @@ describe GroupsController do
       @group = @course.groups.create!(:name => "PG 1", :group_category => @category)
       @group.add_user(@user)
       delete 'remove_user', params: {:group_id => @group.id, :user_id => @user.id, :id => @user.id}
-      expect(response).to be_success
+      expect(response).to be_successful
       @group.reload
       expect(@group.users).to be_empty
     end
@@ -401,7 +400,7 @@ describe GroupsController do
       user_session(@student)
       group_category = @course.group_categories.create(:name => 'some category')
       post 'create', params: {:course_id => @course.id, :group => {:name => "some group", :group_category_id => 11235}}
-      expect(response).not_to be_success
+      expect(response).not_to be_successful
     end
 
     describe "quota" do
@@ -465,7 +464,7 @@ describe GroupsController do
       group_category = @course.group_categories.create(:name => 'some category')
       @group = @course.groups.create!(:name => "some group", :group_category => group_category)
       put 'update', params: {:course_id => @course.id, :id => @group.id, :group => {:group_category_id => 11235}}
-      expect(response).not_to be_success
+      expect(response).not_to be_successful
     end
 
     it "should be able to unset a leader" do
@@ -544,7 +543,7 @@ describe GroupsController do
       group.add_user(u2)
 
       get 'unassigned_members', params: {:course_id => @course.id, :category_id => group.group_category.id}
-      expect(response).to be_success
+      expect(response).to be_successful
       data = json_parse
       expect(data).not_to be_nil
       expect(data['users'].map{ |u| u['user_id'] }.sort).
@@ -571,21 +570,21 @@ describe GroupsController do
       group3.add_user(u3)
 
       get 'unassigned_members', params: {:course_id => @course.id, :category_id => group1.group_category.id}
-      expect(response).to be_success
+      expect(response).to be_successful
       data = json_parse
       expect(data).not_to be_nil
       expect(data['users'].map{ |u| u['user_id'] }.sort).
         to eq [u2, u3].map{ |u| u.id }.sort
 
       get 'unassigned_members', params: {:course_id => @course.id, :category_id => group2.group_category.id}
-      expect(response).to be_success
+      expect(response).to be_successful
       data = json_parse
       expect(data).not_to be_nil
       expect(data['users'].map{ |u| u['user_id'] }.sort).
         to eq [u1, u3].map{ |u| u.id }.sort
 
       get 'unassigned_members', params: {:course_id => @course.id, :category_id => group3.group_category.id}
-      expect(response).to be_success
+      expect(response).to be_successful
       data = json_parse
       expect(data).not_to be_nil
       expect(data['users'].map{ |u| u['user_id'] }).to eq [ u1.id ]
@@ -628,7 +627,7 @@ describe GroupsController do
       # u1 in the group has :read_roster permission
       user_session(u1)
       get 'context_group_members', params: {:group_id => group.id}
-      expect(response).to be_success
+      expect(response).to be_successful
 
       # u2 outside the group doesn't have :read_roster permission, since the
       # group isn't self-signup and is invitation only (clear controller
@@ -636,7 +635,7 @@ describe GroupsController do
       controller.instance_variable_set(:@context_all_permissions, nil)
       user_session(u2)
       get 'context_group_members', params: {:group_id => group.id}
-      expect(response).not_to be_success
+      expect(response).not_to be_successful
     end
   end
 
@@ -707,15 +706,14 @@ describe GroupsController do
       })
       file = Attachment.create! context: @student, filename: "homework.pdf", uploaded_data: StringIO.new("blah blah blah")
       @sub = assignment.submit_homework(@student, attachments: [file], submission_type: "online_upload")
-      @json_prefix = 'while(1);'
     end
 
     it "should include group submissions if param is present" do
       user_session(@teacher)
       get 'users', params: {:group_id => @group.id, include: ['group_submissions']}
-      json = JSON.parse(response.body[@json_prefix.length, response.body.length])
+      json = json_parse(response.body)
 
-      expect(response).to be_success
+      expect(response).to be_successful
       expect(json.count).to be_equal 1
       expect(json[0]["group_submissions"][0]).to be_equal @sub.id
     end
@@ -723,9 +721,9 @@ describe GroupsController do
     it "should not include group submissions if param is absent" do
       user_session(@teacher)
       get 'users', params: {:group_id => @group.id}
-      json = JSON.parse(response.body[@json_prefix.length, response.body.length])
+      json = json_parse(response.body)
 
-      expect(response).to be_success
+      expect(response).to be_successful
       expect(json.count).to be_equal 1
       expect(json[0]["group_submissions"]).to be_equal nil
     end
@@ -733,30 +731,32 @@ describe GroupsController do
     describe "inactive students" do
       before :once do
         course_with_teacher(:active_all => true)
-        students = create_users_in_course(@course, 2, return_type: :record)
-        student1, student2 = students
+        students = create_users_in_course(@course, 3, return_type: :record)
+        @student1, @student2, @student3 = students
         category1 = @course.group_categories.create(:name => "category 1")
         @group = @course.groups.create(:name => "some group", :group_category => category1)
-        @group.add_user(student1)
-        @group.add_user(student2)
-        student2.enrollments.first.deactivate
+        @group.add_user(@student1)
+        @group.add_user(@student2)
+        @group.add_user(@student3)
+        @student2.enrollments.first.deactivate
+        @student3.enrollments.first.update_attributes(:start_at => 1.day.from_now, :end_at => 2.days.from_now) # technically "inactive" but not really
       end
 
       it "include active status if requested" do
         user_session(@teacher)
         get 'users', params: { :group_id => @group.id, include: ['active_status'] }
-        json = JSON.parse(response.body[@json_prefix.length, response.body.length])
-        expect(json.length).to eq 2
-        expect(json.first['is_inactive']).to be_falsey
-        expect(json.second['is_inactive']).to be_truthy
+        json = json_parse(response.body)
+        expect(json.length).to eq 3
+        expect(json.detect{|r| r['id'] == @student1.id}['is_inactive']).to be_falsey
+        expect(json.detect{|r| r['id'] == @student2.id}['is_inactive']).to be_truthy
+        expect(json.detect{|r| r['id'] == @student3.id}['is_inactive']).to be_falsey
       end
 
       it "don't include active status if not requested" do
         user_session(@teacher)
         get 'users', params: { :group_id => @group.id }
-        json = JSON.parse(response.body[@json_prefix.length, response.body.length])
+        json = json_parse(response.body)
         expect(json.first['is_inactive']).to be_nil
-        expect(json.second['is_inactive']).to be_nil
       end
     end
   end

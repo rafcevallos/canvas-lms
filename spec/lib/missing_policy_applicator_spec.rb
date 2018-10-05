@@ -109,6 +109,18 @@ describe MissingPolicyApplicator do
       expect(submission.grade).to eql 'F'
     end
 
+    it 'sets the submission workflow state to "graded"' do
+      late_policy_missing_enabled
+      create_recent_assignment
+      submission = @course.submissions.first
+      submission.update_columns(score: nil, grade: nil, workflow_state: 'unsubmitted')
+
+      applicator.apply_missing_deductions
+      submission.reload
+
+      expect(submission.workflow_state).to eql 'graded'
+    end
+
     it 'does not apply deductions to assignments in a course with missing submission deductions disabled' do
       late_policy_missing_disabled
       create_recent_assignment
@@ -229,6 +241,17 @@ describe MissingPolicyApplicator do
       @course.submissions.first.update_columns(score: nil, grade: nil)
 
       expect { applicator.apply_missing_deductions }.to change(enrollment, :computed_final_score)
+    end
+
+    it 'sets grade_matches_current_submission to true for affected submissions' do
+      create_recent_assignment
+      late_policy_missing_enabled
+
+      submission = @course.submissions.first
+      submission.update_columns(score: nil, grade: nil)
+      applicator.apply_missing_deductions
+
+      expect(submission.reload.grade_matches_current_submission).to be true
     end
   end
 end

@@ -22,6 +22,7 @@ class Quizzes::QuizSubmission < ActiveRecord::Base
   self.table_name = 'quiz_submissions'
 
   include Workflow
+  include PlannerHelper
 
   attr_readonly :quiz_id, :user_id
   attr_accessor :grader_id
@@ -49,6 +50,7 @@ class Quizzes::QuizSubmission < ActiveRecord::Base
   after_save :save_assignment_submission
   after_save :context_module_action
   before_create :assign_validation_token
+  after_save :delete_ignores
 
   has_many :attachments, :as => :context, :inverse_of => :context, :dependent => :destroy
   has_many :events, class_name: 'Quizzes::QuizSubmissionEvent'
@@ -59,11 +61,19 @@ class Quizzes::QuizSubmission < ActiveRecord::Base
   after_update :grade_submission!, if: :just_completed?
 
   def just_completed?
-    submission_id? && workflow_state_changed? && completed?
+    submission_id? && saved_change_to_workflow_state? && completed?
   end
 
   def grade_submission!
     submission.update_attribute(:workflow_state, "graded")
+  end
+
+  after_update :update_planner_override
+
+  def update_planner_override
+    return unless self.saved_change_to_workflow_state?
+    return unless self.workflow_state == "complete"
+    complete_planner_override_for_quiz_submission(self)
   end
 
   serialize :quiz_data
@@ -112,12 +122,11 @@ class Quizzes::QuizSubmission < ActiveRecord::Base
   end
 
   def sanitize_responses
-    questions && questions.select { |q| q['question_type'] == 'essay_question' }.each do |q|
+    questions.select { |q| q['question_type'] == 'essay_question' }.each do |q|
       question_id = q['id']
       if graded?
-        if submission = submission_data.find { |s| s[:question_id] == question_id }
-          submission[:text] = Sanitize.clean(submission[:text] || "", CanvasSanitize::SANITIZE)
-        end
+        submission = submission_data.find { |s| s[:question_id] == question_id }
+        submission[:text] = Sanitize.clean(submission[:text] || "", CanvasSanitize::SANITIZE) if submission
       else
         question_key = "question_#{question_id}"
         if submission_data[question_key]
@@ -233,11 +242,11 @@ class Quizzes::QuizSubmission < ActiveRecord::Base
   end
 
   def points_possible_at_submission_time
-    self.questions_as_object.map { |q| q[:points_possible].to_f }.compact.sum || 0
+    self.questions.map { |q| q[:points_possible].to_f }.compact.sum || 0
   end
 
   def questions
-    Utf8Cleaner.recursively_strip_invalid_utf8!(self.quiz_data, true)
+    Utf8Cleaner.recursively_strip_invalid_utf8!(self.quiz_data, true) || []
   end
 
   def backup_submission_data(params)
@@ -333,14 +342,8 @@ class Quizzes::QuizSubmission < ActiveRecord::Base
     })
   end
 
-  def questions_as_object
-    self.quiz_data || []
-  end
-
   def quiz_question_ids
-    questions_as_object.map{ |question|
-      question["id"]
-    }.compact
+    questions.map { |question| question["id"] }.compact
   end
 
   def quiz_questions
@@ -636,6 +639,7 @@ class Quizzes::QuizSubmission < ActiveRecord::Base
   end
 
   def update_scores(params)
+    original_score = self.score
     params = (params || {}).with_indifferent_access
     self.manually_scored = false
     self.grader_id = params[:grader_id]
@@ -696,9 +700,7 @@ class Quizzes::QuizSubmission < ActiveRecord::Base
     # first we update the version we've been modifying, so that all versions are current.
     update_submission_version(version, [:submission_data, :score, :fudge_points, :workflow_state])
 
-    if version.model.attempt == self.attempt && completed_before_changes
-      self.without_versioning(&:save)
-    else
+    if version.model.attempt != self.attempt || !completed_before_changes
       self.reload
 
       # score_to_keep should work regardless of the current model workflow_state and score
@@ -715,12 +717,19 @@ class Quizzes::QuizSubmission < ActiveRecord::Base
         s.grade_matches_current_submission = true
         s.body = "user: #{self.user_id}, quiz: #{self.quiz_id}, score: #{self.kept_score}, time: #{Time.now}"
         s.saved_by = :quiz_submission
-        s.save!
       end
-
-      self.without_versioning(&:save)
     end
+
+    # submission has to be saved with versioning
+    # to help Auditors::GradeChange record grade_before correctly
+    self.submission.with_versioning(explicit: true, &:save) if self.submission.present?
+    self.without_versioning(&:save)
+
     self.reload
+    grader = Quizzes::SubmissionGrader.new(self)
+    if grader.outcomes_require_update(self, original_score)
+      grader.track_outcomes(version.model.attempt)
+    end
     true
   end
 
@@ -759,14 +768,14 @@ class Quizzes::QuizSubmission < ActiveRecord::Base
     # submissions, not quiz submissions.  The necessary delegations
     # are at the bottom of this class.
     p.dispatch :submission_graded
-    p.to { user }
+    p.to { ([user] + User.observing_students_in_course(user, self.context)).uniq(&:id) }
     p.whenever { |q_sub|
       BroadcastPolicies::QuizSubmissionPolicy.new(q_sub).
         should_dispatch_submission_graded?
     }
 
     p.dispatch :submission_grade_changed
-    p.to { user }
+    p.to { ([user] + User.observing_students_in_course(user, self.context)).uniq(&:id) }
     p.whenever { |q_sub|
       BroadcastPolicies::QuizSubmissionPolicy.new(q_sub).
         should_dispatch_submission_grade_changed?
@@ -786,6 +795,13 @@ class Quizzes::QuizSubmission < ActiveRecord::Base
 
   def assign_validation_token
     self.validation_token = SecureRandom.hex(32)
+  end
+
+  def delete_ignores
+    if completed?
+      Ignore.where(asset_type: 'Quizzes::Quiz', asset_id: quiz_id, user_id: user_id, purpose: 'submitting').delete_all
+    end
+    true
   end
 
   def valid_token?(token)

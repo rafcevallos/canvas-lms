@@ -20,6 +20,7 @@ import I18n from 'i18n!blueprint_settings'
 
 const itemTypeLabels = {
   assignment: I18n.t('Assignment'),
+  assignment_group: I18n.t('Assignment Group'),
   quiz: I18n.t('Quiz'),
   discussion_topic: I18n.t('Discussion'),
   wiki_page: I18n.t('Page'),
@@ -31,7 +32,9 @@ const itemTypeLabels = {
   learning_outcome: I18n.t('Outcome'),
   learning_outcome_group: I18n.t('Outcome Group'),
   rubric: I18n.t('Rubric'),
-  context_external_tool: I18n.t('External Tool')
+  context_external_tool: I18n.t('External Tool'),
+  folder: I18n.t('Folder'),
+  syllabus: I18n.t('Syllabus')
 }
 
 const itemTypeLabelPlurals = {
@@ -54,6 +57,7 @@ const exceptionTypeLabels = {
   due_dates: I18n.t('Due Dates changed exceptions:'),
   availability_dates: I18n.t('Availability Dates changed exceptions:'),
   settings: I18n.t('Settings changed exceptions:'),
+  deleted: I18n.t('Deleted content exceptions:')
 }
 
 const lockTypeLabel = {

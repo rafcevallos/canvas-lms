@@ -16,6 +16,8 @@
  * with this program. If not, see <http://www.gnu.org/licenses/>.
  */
 
+@import 'base/environment';
+
 #login_information {
   > table {
     border-collapse: collapse;
@@ -50,12 +52,12 @@
   }
   }
   .login_details_link {
-    font-style: italic;
+    font-style: normal;
   }
   .links {
     white-space: nowrap;
-    text-align: right;
+    text-align: direction(right);
     font-size: 0.8em;
-    padding-left: 30px;
+    padding-#{direction(left)}: 30px;
   }
 }

@@ -22,7 +22,7 @@ require File.expand_path(File.dirname(__FILE__) + '/../spec_helper')
 describe GradebookCsvsController do
   before :once do
     course_with_teacher active_all: true
-    @course.short_name = "ENG101"
+    @course.short_name = "ENG/ 101"
     @course.save
   end
 
@@ -36,7 +36,7 @@ describe GradebookCsvsController do
 
       get 'show', params: {course_id: @course.id}, format: :json
       json = json_parse(response.body)
-      expect(response).to be_success
+      expect(response).to be_successful
       expect(json).to have_key 'attachment_id'
       expect(json).to have_key 'progress_id'
     end
@@ -56,7 +56,7 @@ describe GradebookCsvsController do
       get 'show', params: {course_id: @course.id}, format: :json
       json = json_parse(response.body)
       attachment = Attachment.find(json['attachment_id'])
-      expect(@course.short_name).to eq(File.basename(attachment.filename.split("-").last, ".csv"))
+      expect(File.basename(attachment.filename.split("-").last, ".csv")).to eq("ENG__101")
     end
 
     it "the CSV filename starts with YYYY-MM-DDTHHMM" do

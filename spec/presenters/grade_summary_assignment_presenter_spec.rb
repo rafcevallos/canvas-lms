@@ -43,22 +43,21 @@ describe GradeSummaryAssignmentPresenter do
                                         @submission)
   }
 
-  describe '#is_plagiarism_attachment?' do
+  describe '#plagiarism_attachment?' do
     it 'returns true if the submission has an OriginalityReport' do
       OriginalityReport.create(originality_score: 0.8,
                                attachment: @attachment,
                                submission: @submission,
-                               workflow_state: 'pending')
+                               workflow_state: 'scored')
 
-      expect(presenter.is_plagiarism_attachment?(@attachment)).to be_truthy
+      expect(presenter.plagiarism_attachment?(@attachment)).to eq true
     end
 
-    it 'returns true if the submission has an OriginalityReport with no attachment' do
-      OriginalityReport.create(originality_score: 0.8,
-                               submission: @submission,
-                               workflow_state: 'pending')
+    it 'returns true when the attachment has a pending originality report' do
+      OriginalityReport.create(attachment: @attachment,
+                               submission: @submission)
 
-      expect(presenter.is_plagiarism_attachment?(@attachment)).to be_truthy
+      expect(presenter.plagiarism_attachment?(@attachment)).to eq true
     end
 
     it 'returns when submission was automatically created by group assignment submission' do
@@ -70,7 +69,7 @@ describe GradeSummaryAssignmentPresenter do
                                attachment: @attachment,
                                submission: @submission,
                                workflow_state: 'pending')
-      expect(presenter.is_plagiarism_attachment?(submission_two.attachments.first)).to be_truthy
+      expect(presenter.plagiarism_attachment?(submission_two.attachments.first)).to eq true
     end
   end
 
@@ -163,6 +162,37 @@ describe GradeSummaryAssignmentPresenter do
       @submission.update(grade: 'A', score: 12)
 
       expect(presenter.entered_grade).to eq('(A)')
+    end
+  end
+
+  describe "#show_submission_details_link?" do
+    before :each do
+      @submission_stub = double()
+      allow(@submission_stub).to receive(:originality_reports_for_display)
+    end
+
+    it "returns false when assignment is not an assignment" do
+      @assignment = {}
+      allow(@submission_stub).to receive(:can_view_details?).and_return(true)
+      presenter = GradeSummaryAssignmentPresenter.new(summary, @student, @assignment, @submission_stub)
+      expect(presenter.show_submission_details_link?).to be false
+    end
+
+    it "returns false when assignment is an assignment and user cannot view details on submission" do
+      allow(@submission_stub).to receive(:can_view_details?).and_return(false)
+      presenter = GradeSummaryAssignmentPresenter.new(summary, @student, @assignment, @submission_stub)
+      expect(presenter.show_submission_details_link?).to be false
+    end
+
+    it "returns true when assignment is an assignment and use can view details on submission" do
+      allow(@submission_stub).to receive(:can_view_details?).and_return(true)
+      presenter = GradeSummaryAssignmentPresenter.new(summary, @student, @assignment, @submission_stub)
+      expect(presenter.show_submission_details_link?).to be true
+    end
+
+    it "returns false when submission is nil" do
+      presenter = GradeSummaryAssignmentPresenter.new(summary, @student, @assignment, nil)
+      expect(presenter.show_submission_details_link?).to be false
     end
   end
 

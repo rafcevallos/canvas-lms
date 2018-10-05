@@ -17,6 +17,9 @@
  */
 import I18n from 'i18n!rubric_assessment'
 import $ from 'jquery'
+import _ from 'lodash'
+import React from 'react'
+import ReactDOM from 'react-dom'
 import htmlEscape from './str/htmlEscape'
 import TextHelper from 'compiled/str/TextHelper'
 import round from 'compiled/util/round'
@@ -26,6 +29,9 @@ import 'jqueryui/dialog'
 import './jquery.instructure_misc_plugins' /* showIf */
 import './jquery.templateData'
 import './vendor/jquery.scrollTo'
+import 'compiled/jquery.rails_flash_notifications' // eslint-disable-line
+import Rubric from 'jsx/rubrics/Rubric'
+import { fillAssessment } from 'jsx/rubrics/helpers'
 
 // TODO: stop managing this in the view and get it out of the global scope submissions/show.html.erb
 /*global rubricAssessment*/
@@ -95,22 +101,7 @@ window.rubricAssessment = {
           $criterion.find(".rating.selected").removeClass('selected');
           if (val || val === 0) {
             $criterion.find(".criterion_description").addClass('completed');
-            $criterion.find(".rating").each(function() {
-              const rating_val = numberHelper.parse($(this).find(".points").text());
-              const use_range = $criterion.find('.criterion_use_range').attr('checked')
-              if (rating_val === val) {
-                $(this).addClass('selected');
-              } else if (use_range) {
-                const $nextRating = $(this).next('.rating')
-                let min_value = 0;
-                if ($nextRating.find(".points").text()) {
-                  min_value = numberHelper.parse($nextRating.find('.points').text());
-                }
-                if ((rating_val > val) && (min_value < val)){
-                  $(this).addClass('selected');
-                }
-              }
-            });
+            rubricAssessment.highlightCriterionScore($criterion, val)
           } else {
             $criterion.find(".criterion_description").removeClass('completed');
           }
@@ -169,6 +160,35 @@ window.rubricAssessment = {
     setInterval(rubricAssessment.sizeRatings, 2500);
   },
 
+  checkScoreAdjustment: ($criterion, rating, rawData) => {
+    const rawPoints = rawData[`rubric_assessment[criterion_${rating.criterion_id}][points]`]
+    const points = rubricAssessment.roundAndFormat(rating.points)
+    if (rawPoints > points) {
+      const criterionDescription = htmlEscape($criterion.find('.description_title').text())
+      $.flashWarning((I18n.t("Extra credit not permitted on outcomes, " +
+        "score adjusted to maximum possible for %{outcome}", {outcome: criterionDescription})))
+    }
+  },
+
+  highlightCriterionScore: function($criterion, val){
+    $criterion.find(".rating").each(function() {
+      const rating_val = numberHelper.parse($(this).find(".points").text());
+      const use_range = $criterion.find('.criterion_use_range').attr('checked')
+      if (rating_val === val) {
+        $(this).addClass('selected');
+      } else if (use_range) {
+        const $nextRating = $(this).next('.rating')
+        let min_value = 0;
+        if ($nextRating.find(".points").text()) {
+          min_value = numberHelper.parse($nextRating.find('.points').text());
+        }
+        if ((rating_val > val) && (min_value < val)){
+          $(this).addClass('selected');
+        }
+      }
+    });
+  },
+
   sizeRatings: function() {
     var $visibleCriteria = $(".rubric .criterion:visible");
     if ($visibleCriteria.length) {
@@ -195,20 +215,33 @@ window.rubricAssessment = {
     var data = {};
     data['rubric_assessment[user_id]'] = ENV.RUBRIC_ASSESSMENT.assessment_user_id || $rubric.find(".user_id").text();
     data['rubric_assessment[assessment_type]'] = ENV.RUBRIC_ASSESSMENT.assessment_type || $rubric.find(".assessment_type").text();
-    $rubric.find(".criterion:not(.blank)").each(function() {
-      var id = $(this).attr('id');
-      var pre = "rubric_assessment[" + id + "]";
-      var points = numberHelper.parse($(this).find('.criterion_points').val());
-      data[pre + "[points]"] = !isNaN(points) ? points : undefined
-      if($(this).find(".rating.selected")) {
-        data[pre + "[description]"] = $(this).find(".rating.selected .description").text();
-        data[pre + "[comments]"] = $(this).find(".custom_rating").text();
-      }
-      if($(this).find(".custom_rating_field:visible").length > 0) {
-        data[pre + "[comments]"] = $(this).find(".custom_rating_field:visible").val();
-        data[pre + "[save_comment]"] = $(this).find(".save_custom_rating").attr('checked') ? "1" : "0";
-      }
-    });
+    if (ENV.nonScoringRubrics && this.currentAssessment !== undefined) {
+      const assessment = this.currentAssessment
+      assessment.data.forEach((criteriaAssessment) => {
+        const pre = `rubric_assessment[criterion_${criteriaAssessment.criterion_id}]`
+        const section = (key) => `${pre}${key}`
+        const points = criteriaAssessment.points.value
+        data[section("[points]")] = !Number.isNaN(points) ? points : undefined
+        data[section("[description]")] = criteriaAssessment.description
+        data[section("[comments]")] = criteriaAssessment.comments || ''
+        data[section("[save_comment]")] = criteriaAssessment.saveCommentsForLater === true ? "1" : "0";
+      })
+    } else {
+      $rubric.find(".criterion:not(.blank)").each(function() {
+        var id = $(this).attr('id');
+        var pre = "rubric_assessment[" + id + "]";
+        var points = numberHelper.parse($(this).find('.criterion_points').val());
+        data[pre + "[points]"] = !isNaN(points) ? points : undefined
+        if($(this).find(".rating.selected")) {
+          data[pre + "[description]"] = $(this).find(".rating.selected .description").text();
+          data[pre + "[comments]"] = $(this).find(".custom_rating").text();
+        }
+        if($(this).find(".custom_rating_field:visible").length > 0) {
+          data[pre + "[comments]"] = $(this).find(".custom_rating_field:visible").val();
+          data[pre + "[save_comment]"] = $(this).find(".save_custom_rating").attr('checked') ? "1" : "0";
+        }
+      });
+    }
     return data;
   },
 
@@ -243,7 +276,37 @@ window.rubricAssessment = {
     }
   },
 
-  populateRubric: function($rubric, data) {
+  fillAssessment,
+
+  populateNewRubric: function(container, assessment, rubricAssociation) {
+    if (ENV.nonScoringRubrics && ENV.rubric) {
+      const assessing = container.hasClass('assessing')
+      const setCurrentAssessment = (currentAssessment) => {
+        rubricAssessment.currentAssessment = currentAssessment
+        render(currentAssessment)
+      }
+
+      const render = (currentAssessment) => {
+        ReactDOM.render(<Rubric
+          allowExtraCredit={ENV.outcome_extra_credit_enabled}
+          onAssessmentChange={assessing ? setCurrentAssessment : null}
+          rubric={ENV.rubric}
+          rubricAssessment={currentAssessment}
+          customRatings={ENV.outcome_proficiency ? ENV.outcome_proficiency.ratings : []}
+          rubricAssociation={rubricAssociation}>
+          {null}
+        </Rubric>, container.get(0))
+      }
+
+      setCurrentAssessment(rubricAssessment.fillAssessment(ENV.rubric, assessment || {}))
+      const header = container.find('th').first()
+      header.attr('tabindex', -1).focus()
+    } else {
+      rubricAssessment.populateRubric(container, assessment);
+    }
+  },
+
+  populateRubric: function($rubric, data, submitted_data = null) {
     $rubric = rubricAssessment.findRubric($rubric);
     var id = $rubric.attr('id').substring(7);
     $rubric.find(".user_id").text(ENV.RUBRIC_ASSESSMENT.assessment_user_id || data.user_id).end()
@@ -278,6 +341,9 @@ window.rubricAssessment = {
             }
           });
         }
+        if (submitted_data && $criterion.hasClass('learning_outcome_criterion')) {
+          rubricAssessment.checkScoreAdjustment($criterion, rating, submitted_data)
+        }
         $criterion
           .find(".custom_rating_field").val(comments).end()
           .find(".custom_rating_comments").html(comments_html).end()
@@ -294,27 +360,57 @@ window.rubricAssessment = {
           $criterion
             .find(".criterion_description").addClass('original_completed').end()
             .find("#rating_" + rating.id).addClass('original_selected').addClass('selected').end()
+          rubricAssessment.highlightCriterionScore($criterion, rating.points);
+          if(!rating.ignore_for_scoring) {
+            total += rating.points;
+          }
         }
         if(comments) $criterion.find('.criterion_comments').show();
-        if(rating.points && !rating.ignore_for_scoring) {
-          total += rating.points;
-        }
       }
       total = window.rubricAssessment.roundAndFormat(total);
       $rubric.find(".rubric_total").text(total);
     }
   },
 
-  populateRubricSummary: function($rubricSummary, data) {
+  populateNewRubricSummary: function(container, assessment, rubricAssociation, editData) {
+    if (ENV.nonScoringRubrics && ENV.rubric) {
+      if(assessment) {
+        const filled = rubricAssessment.fillAssessment(ENV.rubric, assessment || {})
+        ReactDOM.render(<Rubric
+          customRatings={ENV.outcome_proficiency ? ENV.outcome_proficiency.ratings : []}
+          rubric={ENV.rubric}
+          rubricAssessment={filled}
+          rubricAssociation={rubricAssociation}
+          isSummary={true}>
+          {null}
+        </Rubric>, container.get(0))
+      } else {
+        container.get(0).innerHTML = ''
+      }
+    } else {
+      rubricAssessment.populateRubricSummary(
+        container,
+        assessment,
+        editData
+      )
+    }
+  },
+
+  populateRubricSummary: function($rubricSummary, data, editing_data) {
     $rubricSummary.find(".criterion_points").text("").end()
       .find(".rating_custom").text("");
 
     if(data) {
       var assessment = data;
       var total = 0;
+      let $criterion = null;
       for(var idx in assessment.data) {
         var rating = assessment.data[idx];
-        $rubricSummary.find("#criterion_" + rating.criterion_id)
+        $criterion = $rubricSummary.find("#criterion_" + rating.criterion_id);
+        if (editing_data && $criterion.hasClass('learning_outcome_criterion')) {
+          rubricAssessment.checkScoreAdjustment($criterion, rating, editing_data)
+        }
+        $criterion
           .find(".rating").hide().end()
           .find(".rating_" + rating.id).show().end()
           .find('.criterion_points')
@@ -322,11 +418,11 @@ window.rubricAssessment = {
           .end()
           .find(".ignore_for_scoring").showIf(rating.ignore_for_scoring);
         if(ratingHasScore(rating) && !$rubricSummary.hasClass('free_form')){
-          $rubricSummary.find("#criterion_" + rating.criterion_id)
-            .find(".rating.description").show().text(rating.description).end()
+          $criterion.find(".rating.description").show()
+          .text(rating.description).end()
         }
         if(rating.comments_enabled && rating.comments) {
-          $rubricSummary.find("#criterion_" + rating.criterion_id).find(".rating_custom").show().text(rating.comments);
+          $criterion.find(".rating_custom").show().text(rating.comments);
         }
         if(rating.points && !rating.ignore_for_scoring) {
           total += rating.points;

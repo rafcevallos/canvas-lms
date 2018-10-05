@@ -58,7 +58,7 @@ describe Quizzes::QuizStatistics do
     @quiz.generate_submission(@student)
 
     stats = CSV.parse(csv(:include_all_versions => true))
-    expect(stats.first.length).to eq 12
+    expect(stats.first.length).to eq 10
   end
 
   it 'should not include previous versions by default' do
@@ -69,7 +69,7 @@ describe Quizzes::QuizStatistics do
     Quizzes::SubmissionGrader.new(qs).grade_submission
 
     stats = CSV.parse(csv)
-    expect(stats.first.length).to eq 12
+    expect(stats.first.length).to eq 10
   end
 
   it 'generates a new quiz_statistics if the quiz changed' do
@@ -133,6 +133,23 @@ describe Quizzes::QuizStatistics do
     stats.reload
 
     expect(stats.csv_generation_failed?).to be_truthy
+  end
+
+  it "uses inst-fs to store attachment when enabled" do
+    allow(InstFS).to receive(:enabled?).and_return(true)
+    @uuid = "1234-abcd"
+    allow(InstFS).to receive(:direct_upload).and_return(@uuid)
+
+    stats = @quiz.current_statistics_for 'student_analysis'
+    attachment = stats.generate_csv
+    expect(attachment.instfs_uuid).to eq(@uuid)
+  end
+
+  it "doesn't use inst-fs if not enabled" do
+    allow(InstFS).to receive(:enabled?).and_return(false)
+    stats = @quiz.current_statistics_for 'student_analysis'
+    attachment = stats.generate_csv
+    expect(attachment.instfs_uuid).to eq(nil)
   end
 
   describe 'self#large_quiz?' do

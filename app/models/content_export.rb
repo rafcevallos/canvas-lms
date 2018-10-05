@@ -99,7 +99,7 @@ class ContentExport < ActiveRecord::Base
     when USER_DATA
       export_user_data(opts)
     when QUIZZES2
-      return unless root_account.feature_enabled?(:quizzes2_exporter)
+      return unless context.feature_enabled?(:quizzes_next)
       export_quizzes2
     else
       export_course(opts)
@@ -213,9 +213,11 @@ class ContentExport < ActiveRecord::Base
           export_type: QUIZZES2
         )
         self.settings[:quizzes2][:qti_export] = {}
-        self.settings[:quizzes2][:qti_export][:url] = self.attachment.download_url
+        self.settings[:quizzes2][:qti_export][:url] = self.attachment.public_download_url
         self.progress = 100
         mark_exported
+      else
+        mark_failed
       end
     rescue
       add_error("Error running export to Quizzes 2.", $!)
@@ -316,7 +318,7 @@ class ContentExport < ActiveRecord::Base
     return false unless obj
     return true unless selective_export?
 
-    return master_migration.export_object?(obj) if for_master_migration?
+    return true if for_master_migration? && master_migration.export_object?(obj) # fallback to selected_content otherwise
 
     # because Announcement.table_name == 'discussion_topics'
     if obj.is_a?(Announcement)
@@ -341,13 +343,12 @@ class ContentExport < ActiveRecord::Base
   #
   # Returns: bool
   def export_symbol?(symbol)
-    return false if symbol == :all_course_settings && should_skip_course_settings?
     selected_content.empty? || is_set?(selected_content[symbol]) || is_set?(selected_content[:everything])
   end
 
   def add_item_to_export(obj, type=nil)
     return unless obj && (type || obj.class.respond_to?(:table_name))
-    return unless selective_export? && !for_master_migration?
+    return unless selective_export?
 
     asset_type = type || obj.class.table_name
     selected_content[asset_type] ||= {}
@@ -363,18 +364,6 @@ class ContentExport < ActiveRecord::Base
       end
     end
     @selective_export
-  end
-
-  def should_skip_course_settings?
-    if for_master_migration?
-      if master_migration.migration_settings.has_key?(:copy_settings)
-        !master_migration.migration_settings[:copy_settings]
-      else
-        selective_export?
-      end
-    else
-      false
-    end
   end
 
   def exported_assets

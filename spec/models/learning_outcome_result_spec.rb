@@ -20,11 +20,15 @@ require File.expand_path(File.dirname(__FILE__) + '/../spec_helper.rb')
 
 describe LearningOutcomeResult do
 
-  let_once :learning_outcome_result do
-    create_and_associate_lor(quiz_model)
+  let_once :quiz do
+    quiz_model(assignment: assignment_model)
   end
 
-  def create_and_associate_lor(association_object)
+  let_once :learning_outcome_result do
+    create_and_associate_lor(quiz)
+  end
+
+  def create_and_associate_lor(association_object, associated_asset = nil)
     assignment_model
     outcome = @course.created_learning_outcomes.create!(title: 'outcome')
 
@@ -32,61 +36,13 @@ describe LearningOutcomeResult do
       alignment: ContentTag.create!({
         title: 'content',
         context: @course,
-        learning_outcome: outcome})
-      ).tap do |lor|
-        lor.association_object = association_object
-        lor.context = @course
-        lor.associated_asset = association_object
-        lor.save!
-      end
-  end
-
-  describe '.association_type' do
-    it 'returns the correct representation of a quiz' do
-      expect(learning_outcome_result.association_type).to eq 'Quizzes::Quiz'
-
-      learning_outcome_result.association_type = 'Quiz'
-      learning_outcome_result.send(:save_without_callbacks)
-
-      expect(LearningOutcomeResult.first.association_type).to eq 'Quizzes::Quiz'
-    end
-
-    it 'returns the association type attribute if not a quiz' do
-      learning_outcome_result.association_object = assignment_model
-      learning_outcome_result.send(:save_without_callbacks)
-      expect(learning_outcome_result.association_type).to eq 'Assignment'
-    end
-  end
-
-  describe '.artifact_type' do
-    it 'returns the correct representation of a quiz submission' do
-      sub = learning_outcome_result.association_object.quiz_submissions.create!
-
-      learning_outcome_result.artifact = sub
-      learning_outcome_result.save
-      expect(learning_outcome_result.artifact_type).to eq 'Quizzes::QuizSubmission'
-
-      LearningOutcomeResult.where(id: learning_outcome_result).update_all(association_type: 'QuizSubmission')
-
-      expect(LearningOutcomeResult.find(learning_outcome_result.id).artifact_type).to eq 'Quizzes::QuizSubmission'
-    end
-  end
-
-  describe '.associated_asset_type' do
-    it 'returns the correct representation of a quiz' do
-      expect(learning_outcome_result.associated_asset_type).to eq 'Quizzes::Quiz'
-
-      learning_outcome_result.associated_asset_type = 'Quiz'
-      learning_outcome_result.send(:save_without_callbacks)
-
-      expect(LearningOutcomeResult.first.associated_asset_type).to eq 'Quizzes::Quiz'
-    end
-
-    it 'returns the associated asset type attribute if not a quiz' do
-      learning_outcome_result.associated_asset = assignment_model
-      learning_outcome_result.send(:save_without_callbacks)
-
-      expect(learning_outcome_result.associated_asset_type).to eq 'Assignment'
+        learning_outcome: outcome
+      })
+    ).tap do |lor|
+      lor.association_object = association_object
+      lor.context = @course
+      lor.associated_asset = associated_asset || association_object
+      lor.save!
     end
   end
 
@@ -108,7 +64,61 @@ describe LearningOutcomeResult do
       })
       expect(learning_outcome_result.submitted_or_assessed_at).to eq(@assessed_at)
     end
+  end
 
+  describe 'exclude_muted_associations scope' do
+    shared_examples_for 'muting assignment' do
+      context 'unmuted assignment' do
+        it 'includes assignment result' do
+          total = LearningOutcomeResult.count
+          expect(LearningOutcomeResult.exclude_muted_associations.count).to eq total
+        end
+      end
+
+      context 'muted assignment' do
+        before do
+          assignment.mute!
+        end
+
+        it 'excludes assignment result' do
+          total = LearningOutcomeResult.count
+          expect(LearningOutcomeResult.exclude_muted_associations.count).to eq(total-1)
+        end
+      end
+    end
+
+    context 'with quiz assignment' do
+      let_once :assignment do
+        quiz.assignment
+      end
+
+      include_examples 'muting assignment'
+    end
+
+    context 'with assignment result' do
+      let_once :assignment do
+        assignment_model
+      end
+
+      let_once :assignment_learning_outcome_result do
+        create_and_associate_lor(assignment)
+      end
+
+      include_examples 'muting assignment'
+    end
+
+    context 'with rubric association result' do
+      let_once :assignment do
+        assignment_model
+      end
+
+      let_once :assignment_learning_outcome_result do
+        rubric_assessment_model(user: @user, context: @course, association_object: assignment, purpose: 'grading')
+        create_and_associate_lor(@rubric_association, assignment)
+      end
+
+      include_examples 'muting assignment'
+    end
   end
 
   describe "active scope" do
@@ -152,6 +162,30 @@ describe LearningOutcomeResult do
       learning_outcome_result.calculate_percent!
 
       expect(learning_outcome_result.percent).to eq 0.5143
+    end
+
+    it "properly scales score to parent outcome's mastery level with extra credit" do
+      allow(learning_outcome_result.learning_outcome).to receive_messages({
+        points_possible: 5.0, mastery_points: 3.0
+      })
+      allow(learning_outcome_result.alignment).to receive_messages(mastery_score: 1.0)
+      learning_outcome_result.update_attributes(score: 5)
+      learning_outcome_result.update_attributes(possible: 0.5)
+      learning_outcome_result.calculate_percent!
+
+      expect(learning_outcome_result.percent).to eq 6.0
+    end
+
+    it "properly scales score to parent outcome's mastery level with extra credit and points possible is 0" do
+      allow(learning_outcome_result.learning_outcome).to receive_messages({
+        points_possible: 0.0, mastery_points: 3.0
+      })
+      allow(learning_outcome_result.alignment).to receive_messages(mastery_score: 1.0)
+      learning_outcome_result.update_attributes(score: 5)
+      learning_outcome_result.update_attributes(possible: 0.5)
+      learning_outcome_result.calculate_percent!
+
+      expect(learning_outcome_result.percent).to eq 10.0
     end
 
     it "does not fail if parent outcome has integers instead of floats" do
@@ -202,8 +236,7 @@ describe LearningOutcomeResult do
     it 'returns the Assignment from the artifact if one doesnt explicitly exist' do
       lor = create_and_associate_lor(nil)
       lor.artifact = rubric_assessment_model(user: @user, context: @course)
-
-      expect(lor.assignment).to eq(lor.artifact.assignment)
+      expect(lor.assignment).to eq(lor.artifact.submission.assignment)
     end
 
     it 'returns nil if no explicit assignment or artifact exists' do

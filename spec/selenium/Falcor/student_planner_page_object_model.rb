@@ -25,16 +25,16 @@ module PlannerPageObject
   end
 
   def select_list_view
-    driver.find_element(:xpath, "//span[text()[contains(.,'List View')]]").click
+    fj('span[role="menuitemradio"]:contains("List View")').click
   end
 
   def select_dashboard_view
-    driver.find_element(:xpath, "//span[text()[contains(.,'Card View')]]").click
+    fj('span[role="menuitemradio"]:contains("Card View")').click
   end
 
   def navigate_to_course_object(object)
     expect_new_page_load do
-      fln(object.title.to_s).click
+      flnpt(object.title.to_s).click
     end
   end
 
@@ -46,16 +46,31 @@ module PlannerPageObject
     expect(url).to eq(expected_url)
   end
 
-  def validate_object_displayed(object_type)  # Pass what type of object it is. Ensure object's name starts with a capital letter
-    expect(f('.PlannerApp').find_element(:xpath, "//span[text()[contains(.,'Unnamed Course #{object_type}')]]")).
-      to be_displayed
+  def validate_submissions_url(object_type, object, user)
+    url = driver.current_url
+    domain = url.split('courses')[0]
+    expected_url = domain + "courses/#{@course.id}/#{object_type}/#{object.id}/submissions/#{user.id}"
+    expect(url).to eq(expected_url)
+  end
+
+  def validate_calendar_url(object)
+    url = driver.current_url
+    domain = url.split('calendar')[0]
+    expected_url = domain + "calendar?event_id=#{object.id}&include_contexts=#{object.context_code}"
+    expected_url += "#view_start=#{object.start_at.to_date}&view_name=month"
+    expect(url).to eq(expected_url)
+  end
+
+  # Pass what type of object it is. Ensure object's name starts with a capital letter
+  def validate_object_displayed(object_type)
+    expect(fxpath("//*[contains(@class, 'PlannerApp')]//span[contains(text(),'Unnamed Course #{object_type}')]")).to be_displayed
   end
 
   def validate_no_due_dates_assigned
-    expect(f('#dashboard-planner').find_element(:xpath, "//h2[text()[contains(.,'No Due Dates Assigned')]]")).
-      to be_displayed
-    expect(f('#dashboard-planner').find_element(:xpath, "//div[text()[contains(.,\"Looks like there isn't anything here\")]]")).
-      to be_displayed
+    expect(fxpath('//*[@id="dashboard-planner"]//h2[contains(text(),"No Due Dates Assigned")]')).to be_displayed
+    expect(
+      fxpath('//*[@id="dashboard-planner"]//div[contains(text(),"Looks like there isn\'t anything here")]')
+    ).to be_displayed
   end
 
   def go_to_dashcard_view
@@ -65,15 +80,15 @@ module PlannerPageObject
   end
 
   def expand_completed_item
-    f('.PlannerApp').find_element(:xpath, "//*[text()[contains(.,'Show 1 completed item')]]").click
+    fxpath('//*[contains(@class, "PlannerApp")]//*[contains(text(),"Show 1 completed item")]').click
   end
 
   def validate_pill(pill_type)
-    expect(f('.PlannerApp').find_element(:xpath, "//*[text()[contains(.,'#{pill_type}')]]")).to be_displayed
+    expect(fxpath("//*[contains(@class, 'PlannerApp')]//*[contains(text(),'#{pill_type}')]")).to be_displayed
   end
 
   def go_to_list_view
-    @student1.preferences[:dashboard_view] = "planner"
+    @student1.dashboard_view = "planner"
     @student1.save!
     get '/'
     wait_for_planner_load
@@ -82,15 +97,56 @@ module PlannerPageObject
   # should pass the type of object as a string
   def validate_link_to_url(object, url_type)
     navigate_to_course_object(object)
-    validate_url(url_type, object)
+    object.is_a?(CalendarEvent) ? validate_calendar_url(object) : validate_url(url_type, object)
+  end
+
+  def validate_link_to_submissions(object, user, url_type)
+    navigate_to_course_object(object)
+    validate_submissions_url(url_type, object, user)
   end
 
   def view_todo_item
     @student_to_do = @student1.planner_notes.create!(todo_date: Time.zone.now,
                                                      title: "Student to do", course_id: @course.id)
     go_to_list_view
-    fln(@student_to_do.title).click
+    flnpt(@student_to_do.title).click
     @modal = todo_sidebar_modal(@student_to_do.title)
+  end
+
+  def graded_discussion_in_the_past(due = Time.zone.now - 2.days, title = 'Graded discussion')
+    assignment = @course.assignments.create!(name: 'assignment 1',
+                                              due_at: due)
+    discussion = @course.discussion_topics.create!(user: @teacher,
+                                                    title: title,
+                                                    message: 'Discussion topic message',
+                                                    assignment: assignment)
+    discussion.discussion_entries.create!(user: @teacher,
+                                           message: "new reply from teacher")
+  end
+
+  def graded_discussion_in_the_future
+    assignment = @course.assignments.create!(name: 'assignment 2',
+                                              due_at: Time.zone.now + 2.days)
+    discussion = @course.discussion_topics.create!(user: @teacher,
+                                                    title: 'Graded discussion 2',
+                                                    message: 'Discussion topic message',
+                                                    assignment: assignment)
+    discussion.discussion_entries.create!(user: @teacher,
+                                           message: "new reply from teacher")
+  end
+
+  def discussion_index_page_detail
+    # might need to change when implementing
+    f('.todo-date')
+  end
+
+  def discussion_show_page_detail
+    # might need to change when implementing
+    f('.discussion-tododate')
+  end
+
+  def pages_detail
+    # Complete this while fixing ADMIN-1161
   end
 
   def open_opportunities_dropdown
@@ -105,10 +161,19 @@ module PlannerPageObject
     fj("button:contains('Add To Do')")
   end
 
+  def new_activity_button
+    fj("button:contains('New Activity')")
+  end
+
+  def today_button
+    f("#planner-today-btn")
+  end
+
   def wait_for_planner_load
     wait_for_dom_ready
     wait_for_ajaximations
     todo_modal_button
+    f('.planner-day, .planner-empty-state') # one or the other will be rendered
   end
 
   def wait_for_dashboard_load
@@ -117,29 +182,55 @@ module PlannerPageObject
     f('.ic-dashboard-app')
   end
 
+  def title_input(title = nil)
+    modal = todo_sidebar_modal(title)
+    ff('input', modal)[0]
+  end
+
+  def time_input
+    modal = todo_sidebar_modal
+    ff('input', modal)[2]
+  end
+
   def todo_save_button
     fj("button:contains('Save')")
   end
 
   def todo_details
-    f('textarea')
+    modal = todo_sidebar_modal
+    f('textarea', modal)
+  end
+
+  def todo_sidebar_modal_selector(title = nil)
+    if title
+      "[aria-label = 'Edit #{title}']"
+    else
+      "[aria-label = 'Add To Do']"
+    end
   end
 
   def todo_sidebar_modal(title = nil)
-    if title
-      f("[aria-label = 'Edit #{title}']")
-    else
-      f("[aria-label = 'Add To Do']")
-    end
+    f(todo_sidebar_modal_selector(title))
   end
 
   def wait_for_spinner
     fj("title:contains('Loading')", f('.PlannerApp')) # the loading spinner appears
-    expect(f('.PlannerApp')).not_to contain_css('title') # and disappears
+    expect(f('.PlannerApp')).not_to contain_jqcss("title:contains('Loading')")
   end
 
   def items_displayed
     ff('li', f('.PlannerApp'))
+  end
+
+  def first_item_on_page
+    items_displayed[0]
+  end
+
+  def new_activities_in_the_past
+    old = graded_discussion_in_the_past
+    older = graded_discussion_in_the_past(Time.zone.now-4.days, 'older')
+    oldest = graded_discussion_in_the_past(Time.zone.now-6.days, 'oldest')
+    [old, older, oldest]
   end
 
   def todo_info_holder

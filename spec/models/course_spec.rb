@@ -23,8 +23,11 @@ require 'csv'
 require 'socket'
 
 describe Course do
+  include_examples "outcome import context examples"
+
   describe 'relationships' do
     it { is_expected.to have_one(:late_policy).dependent(:destroy).inverse_of(:course) }
+    it { is_expected.to have_many(:feature_flags) }
   end
 
   describe 'lti2 proxies' do
@@ -35,6 +38,8 @@ describe Course do
       expect(course.tool_proxies.size).to eq 1
     end
   end
+
+  it_behaves_like 'a learning outcome context'
 end
 
 describe Course do
@@ -61,6 +66,142 @@ describe Course do
     @course.save!
     expect(DueDateCacher).not_to receive(:recompute_course)
     @course.save!
+  end
+
+  it "should correctly identify course as active" do
+    @course.enrollment_term = EnrollmentTerm.create!(root_account: Account.default, workflow_state: :active)
+    expect(@course.inactive?).to eq false
+  end
+
+  it "should correctly identify destroyed course as not active" do
+    @course.enrollment_term = EnrollmentTerm.create!(root_account: Account.default, workflow_state: :active)
+    @course.destroy!
+    expect(@course.inactive?).to eq true
+  end
+
+  it "should correctly identify concluded course as not active" do
+    @course.complete!
+    expect(@course.inactive?).to eq true
+  end
+
+  describe '#grading_standard_or_default' do
+    it 'returns the grading scheme being used by the course, if one exists' do
+      @course.save!
+      standard = grading_standard_for(@course)
+      @course.update!(default_grading_standard: standard)
+      expect(@course.grading_standard_or_default).to be standard
+    end
+
+    it 'returns the Canvas default grading scheme if the course is not using a grading scheme' do
+      expect(@course.grading_standard_or_default.data).to eq GradingStandard.default_grading_standard
+    end
+  end
+
+  describe "#moderated_grading_max_grader_count" do
+    before(:once) do
+      @course = Course.create!
+    end
+
+    it 'returns 1 if the course has no instructors' do
+      expect(@course.moderated_grading_max_grader_count).to eq 1
+    end
+
+    it 'returns 1 if the course has one instructor' do
+      teacher = User.create!
+      @course.enroll_teacher(teacher)
+      expect(@course.moderated_grading_max_grader_count).to eq 1
+    end
+
+    it 'returns 10 if the course has more than 11 instructors' do
+      create_users_in_course(@course, 6, enrollment_type: 'TeacherEnrollment')
+      create_users_in_course(@course, 6, enrollment_type: 'TaEnrollment')
+      expect(@course.moderated_grading_max_grader_count).to eq 10
+    end
+
+    it 'returns N-1 if the course has between 1 < N < 12 instructors' do
+      create_users_in_course(@course, 2, enrollment_type: 'TeacherEnrollment')
+      @course.enroll_ta(User.create!, enrollment_state: 'active')
+      expect { @course.enroll_ta(User.create!, enrollment_state: 'active') }.to change {
+        @course.moderated_grading_max_grader_count
+      }.from(2).to(3)
+    end
+
+    it 'ignores deactivated instructors' do
+      create_users_in_course(@course, 2, enrollment_type: 'TeacherEnrollment')
+      @course.enroll_ta(User.create!, enrollment_state: 'active').deactivate
+      expect(@course.moderated_grading_max_grader_count).to eq 1
+    end
+
+    it 'ignores concluded instructors' do
+      create_users_in_course(@course, 2, enrollment_type: 'TeacherEnrollment')
+      @course.enroll_ta(User.create!, enrollment_state: 'active').conclude
+      expect(@course.moderated_grading_max_grader_count).to eq 1
+    end
+
+    it 'ignores deleted instructors' do
+      create_users_in_course(@course, 2, enrollment_type: 'TeacherEnrollment')
+      @course.enroll_ta(User.create!, enrollment_state: 'active').destroy
+      expect(@course.moderated_grading_max_grader_count).to eq 1
+    end
+
+    it 'ignores non-instructors' do
+      create_users_in_course(@course, 2, enrollment_type: 'TeacherEnrollment')
+      @course.enroll_student(User.create!, enrollment_state: 'active')
+      expect(@course.moderated_grading_max_grader_count).to eq 1
+    end
+  end
+
+  describe '#moderators' do
+    before(:once) do
+      @course = Course.create!
+      @teacher = User.create!
+      @course.enroll_teacher(@teacher)
+      @ta = User.create!
+      @course.enroll_ta(@ta)
+    end
+
+    it 'includes active teachers' do
+      expect(@course.moderators).to include @teacher
+    end
+
+    it 'includes active TAs' do
+      expect(@course.moderators).to include @ta
+    end
+
+    it 'excludes active teachers if teachers have "Select Final Grade" priveleges revoked' do
+      @course.root_account.role_overrides.create!(permission: 'select_final_grade', role: teacher_role, enabled: false)
+      expect(@course.moderators).not_to include @teacher
+    end
+
+    it 'excludes active TAs if TAs have "Select Final Grade" priveleges revoked' do
+      @course.root_account.role_overrides.create!(permission: 'select_final_grade', role: ta_role, enabled: false)
+      expect(@course.moderators).not_to include @ta
+    end
+
+    it 'excludes inactive teachers' do
+      @course.enrollments.find_by!(user_id: @teacher).deactivate
+      expect(@course.moderators).not_to include @teacher
+    end
+
+    it 'excludes concluded teachers' do
+      @course.enrollments.find_by!(user_id: @teacher).conclude
+      expect(@course.moderators).not_to include @teacher
+    end
+
+    it 'excludes inactive TAs' do
+      @course.enrollments.find_by!(user_id: @ta).deactivate
+      expect(@course.moderators).not_to include @ta
+    end
+
+    it 'excludes concluded TAs' do
+      @course.enrollments.find_by!(user_id: @ta).conclude
+      expect(@course.moderators).not_to include @ta
+    end
+
+    it 'excludes admins' do
+      admin = account_admin_user
+      expect(@course.moderators).not_to include admin
+    end
   end
 
   describe "#recompute_student_scores" do
@@ -93,6 +234,25 @@ describe Course do
       enrollment = course_with_student(active_all: true)
       expect(Enrollment).to receive(:recompute_final_score).with([], any_args)
       first_course.recompute_student_scores([enrollment.user_id])
+    end
+
+    it "triggers a delayed job by default" do
+      expect(@course).to receive(:send_later_if_production_enqueue_args).
+        with(:recompute_student_scores_without_send_later, any_args)
+
+      @course.recompute_student_scores
+    end
+
+    it "does not trigger a delayed job when passed run_immediately: true" do
+      expect(@course).not_to receive(:send_later_if_production_enqueue_args).
+        with(:recompute_student_scores_without_send_later, any_args)
+
+      @course.recompute_student_scores(nil, run_immediately: true)
+    end
+
+    it "calls recompute_student_scores_without_send_later when passed run_immediately: true" do
+      expect(@course).to receive(:recompute_student_scores_without_send_later)
+      @course.recompute_student_scores(nil, run_immediately: true)
     end
   end
 
@@ -937,8 +1097,9 @@ describe Course do
       sub = @course.root_account.sub_accounts.create
       @course.sis_source_id = 'sis_id'
       @course.course_code = "cid"
-      @course.save!
       @course.stuck_sis_fields = [].to_set
+      @course.save!
+      @course.reload
       @course.name = "course_name"
       expect(@course.stuck_sis_fields).to eq [:name].to_set
       profile = @course.profile
@@ -1105,6 +1266,43 @@ describe Course do
     expect { Marshal.dump(c) }.not_to raise_error
     c.save!
     expect { Marshal.dump(c) }.not_to raise_error
+  end
+
+  describe "course_section_visibility" do
+    before :once do
+      @course = Account.default.courses.create!
+      @section1 = @course.course_sections.create!(:name => "Section 1")
+      @section2 = @course.course_sections.create!(:name => "Section 2")
+    end
+
+    it "returns all for admins" do
+      admin = account_admin_user(account: @course.root_account, role: admin_role, active_user: true)
+      expect(@course.course_section_visibility(admin)).to eq :all
+    end
+
+    it "returns correct sections for students" do
+      student = User.create!(:name => "Student")
+      @course.enroll_student(student, :section => @section1)
+      expect(@course.course_section_visibility(student)).to eq [@section1.id]
+    end
+
+    it "correctly limits visibilities for a limited teacher" do
+      limited_teacher = User.create(:name => "Limited Teacher")
+      @course.enroll_teacher(limited_teacher, :limit_privileges_to_course_section => true,
+        :section => @section2)
+      expect(@course.course_section_visibility(limited_teacher)).to eq [@section2.id]
+    end
+
+    it "unlimited teachers can see everything" do
+      unlimited_teacher = User.create(:name => "Unlimited Teacher")
+      @course.enroll_teacher(unlimited_teacher, :section => @section2)
+      expect(@course.course_section_visibility(unlimited_teacher)).to eq :all
+    end
+
+    it "returns none for a nobody" do
+      worthless_loser = User.create(:name => "Worthless Loser")
+      expect(@course.course_section_visibility(worthless_loser)).to eq []
+    end
   end
 end
 
@@ -1349,14 +1547,16 @@ describe Course, "gradebook_to_csv" do
 
     csv = GradebookExporter.new(@course, @teacher).to_csv
     expect(csv).not_to be_nil
-    rows = CSV.parse(csv)
-    expect(rows.length).to equal(3)
-    expect(rows[0][-1]).to eq "Final Score"
-    expect(rows[1][-1]).to eq "(read only)"
-    expect(rows[2][-1]).to eq "50.0"
-    expect(rows[0][-2]).to eq "Current Score"
-    expect(rows[1][-2]).to eq "(read only)"
-    expect(rows[2][-2]).to eq "100.0"
+    rows = CSV.parse(csv, headers: true)
+    expect(rows.length).to equal(2)
+    expect(rows[0]["Unposted Final Score"]).to eq "(read only)"
+    expect(rows[1]["Unposted Final Score"]).to eq "50.0"
+    expect(rows[0]["Final Score"]).to eq "(read only)"
+    expect(rows[1]["Final Score"]).to eq "50.0"
+    expect(rows[0]["Unposted Current Score"]).to eq "(read only)"
+    expect(rows[1]["Unposted Current Score"]).to eq "100.0"
+    expect(rows[0]["Current Score"]).to eq "(read only)"
+    expect(rows[1]["Current Score"]).to eq "100.0"
   end
 
   it "should order assignments and groups by position" do
@@ -1388,27 +1588,33 @@ describe Course, "gradebook_to_csv" do
 
     csv = GradebookExporter.new(@course, @teacher).to_csv
     expect(csv).not_to be_nil
-    rows = CSV.parse(csv)
-    expect(rows.length).to equal(3)
+    rows = CSV.parse(csv, headers: true)
+    expect(rows.length).to equal(2)
     assignments, groups = [], []
-    rows[0].each do |column|
+    rows.headers.each do |column|
       assignments << column.sub(/ \([0-9]+\)/, '') if column =~ /Assignment \d+/
       groups << column if column =~ /Some Assignment Group/
     end
     expect(assignments).to eq ["Assignment 02", "Assignment 03", "Assignment 01", "Assignment 05",  "Assignment 04", "Assignment 06", "Assignment 07", "Assignment 09", "Assignment 11", "Assignment 12", "Assignment 13", "Assignment 14", "Assignment 08", "Assignment 10"]
-    expect(groups).to eq ["Some Assignment Group 1 Current Points",
-                      "Some Assignment Group 1 Final Points",
-                      "Some Assignment Group 1 Current Score",
-                      "Some Assignment Group 1 Final Score",
-                      "Some Assignment Group 2 Current Points",
-                      "Some Assignment Group 2 Final Points",
-                      "Some Assignment Group 2 Current Score",
-                      "Some Assignment Group 2 Final Score"]
+    expect(groups).to eq [
+      "Some Assignment Group 1 Current Points",
+      "Some Assignment Group 1 Final Points",
+      "Some Assignment Group 1 Current Score",
+      "Some Assignment Group 1 Unposted Current Score",
+      "Some Assignment Group 1 Final Score",
+      "Some Assignment Group 1 Unposted Final Score",
+      "Some Assignment Group 2 Current Points",
+      "Some Assignment Group 2 Final Points",
+      "Some Assignment Group 2 Current Score",
+      "Some Assignment Group 2 Unposted Current Score",
+      "Some Assignment Group 2 Final Score",
+      "Some Assignment Group 2 Unposted Final Score"
+    ]
 
-    expect(rows[2][-10]).to eq "100.0"    # ag1 current score
-    expect(rows[2][-9]).to  eq "50.0"     # ag1 final score
-    expect(rows[2][-6]).to  eq "50.0"     # ag2 current score
-    expect(rows[2][-5]).to  eq "25.0"     # ag2 final score
+    expect(rows[1]["Some Assignment Group 1 Current Score"]).to eq "100.0"
+    expect(rows[1]["Some Assignment Group 1 Final Score"]).to eq "50.0"
+    expect(rows[1]["Some Assignment Group 2 Current Score"]).to eq "50.0"
+    expect(rows[1]["Some Assignment Group 2 Final Score"]).to eq "25.0"
   end
 
   it "handles nil assignment due_dates if the group and position are the same" do
@@ -1472,7 +1678,7 @@ describe Course, "gradebook_to_csv" do
 
   it "marks excused assignments" do
     a = @course.assignments.create! name: "asdf", points_possible: 10
-    a.grade_student @student, excuse: true
+    a.grade_student(@student, grader: @teacher, excuse: true)
     csv = CSV.parse(GradebookExporter.new(@course, @teacher).to_csv)
     _name, _id, _section, _sis_login_id, score, _ = csv[-1]
     expect(score).to eq "EX"
@@ -1516,20 +1722,24 @@ describe Course, "gradebook_to_csv" do
 
     csv = GradebookExporter.new(@course, @teacher).to_csv
     expect(csv).not_to be_nil
-    rows = CSV.parse(csv)
-    expect(rows.length).to equal(3)
-    expect(rows[0][-1]).to eq "Final Grade"
-    expect(rows[1][-1]).to eq "(read only)"
-    expect(rows[2][-1]).to eq "A-"
-    expect(rows[0][-2]).to eq "Current Grade"
-    expect(rows[1][-2]).to eq "(read only)"
-    expect(rows[2][-2]).to eq "A-"
-    expect(rows[0][-3]).to eq "Final Score"
-    expect(rows[1][-3]).to eq "(read only)"
-    expect(rows[2][-3]).to eq "90.0"
-    expect(rows[0][-4]).to eq "Current Score"
-    expect(rows[1][-4]).to eq "(read only)"
-    expect(rows[2][-4]).to eq "90.0"
+    rows = CSV.parse(csv, headers: true)
+    expect(rows.length).to equal(2)
+    expect(rows[0]["Unposted Final Grade"]).to eq "(read only)"
+    expect(rows[1]["Unposted Final Grade"]).to eq "A-"
+    expect(rows[0]["Final Grade"]).to eq "(read only)"
+    expect(rows[1]["Final Grade"]).to eq "A-"
+    expect(rows[0]["Unposted Current Grade"]).to eq "(read only)"
+    expect(rows[1]["Unposted Current Grade"]).to eq "A-"
+    expect(rows[0]["Current Grade"]).to eq "(read only)"
+    expect(rows[1]["Current Grade"]).to eq "A-"
+    expect(rows[0]["Unposted Final Score"]).to eq "(read only)"
+    expect(rows[1]["Unposted Final Score"]).to eq "90.0"
+    expect(rows[0]["Final Score"]).to eq "(read only)"
+    expect(rows[1]["Final Score"]).to eq "90.0"
+    expect(rows[0]["Unposted Current Score"]).to eq "(read only)"
+    expect(rows[1]["Unposted Current Score"]).to eq "90.0"
+    expect(rows[0]["Current Score"]).to eq "(read only)"
+    expect(rows[1]["Current Score"]).to eq "90.0"
   end
 
   it "should include sis ids if enabled" do
@@ -1645,19 +1855,15 @@ describe Course, "gradebook_to_csv" do
     end
 
     it "includes points for unweighted courses" do
-      csv = CSV.parse(GradebookExporter.new(@course, @teacher).to_csv)
-      expect(csv[0][-8]).to eq "Assignments Current Points"
-      expect(csv[0][-7]).to eq "Assignments Final Points"
-      expect(csv[1][-8]).to eq "(read only)"
-      expect(csv[1][-7]).to eq "(read only)"
-      expect(csv[2][-8]).to eq "8.0"
-      expect(csv[2][-7]).to eq "8.0"
-      expect(csv[0][-4]).to eq "Current Points"
-      expect(csv[0][-3]).to eq "Final Points"
-      expect(csv[1][-4]).to eq "(read only)"
-      expect(csv[1][-3]).to eq "(read only)"
-      expect(csv[2][-4]).to eq "8.0"
-      expect(csv[2][-3]).to eq "8.0"
+      csv = CSV.parse(GradebookExporter.new(@course, @teacher).to_csv, headers: true)
+      expect(csv[0]["Assignments Current Points"]).to eq "(read only)"
+      expect(csv[1]["Assignments Current Points"]).to eq "8.0"
+      expect(csv[0]["Assignments Final Points"]).to eq "(read only)"
+      expect(csv[1]["Assignments Final Points"]).to eq "8.0"
+      expect(csv[0]["Current Points"]).to eq "(read only)"
+      expect(csv[1]["Current Points"]).to eq "8.0"
+      expect(csv[0]["Final Points"]).to eq "(read only)"
+      expect(csv[1]["Final Points"]).to eq "8.0"
     end
 
     it "doesn't include points for weighted courses" do
@@ -1818,10 +2024,26 @@ describe Course, "gradebook_to_csv_in_background" do
 
       @shard1.activate do
         expect {
-          Attachment.find(@attachment_id).download_url
+          Attachment.find(@attachment_id).public_download_url
         }.not_to raise_error
       end
     end
+  end
+  it "create_attachment uses inst-fs if inst-fs is enabled" do
+    @uuid = "1234-abcd"
+    allow(InstFS).to receive(:direct_upload).and_return(@uuid)
+    allow(InstFS).to receive(:enabled?).and_return(true)
+    @user = user_factory(active_all: true)
+    student_in_course(active_all: true)
+
+    attachment = @user.attachments.build
+    attachment.content_type = "text/csv"
+    attachment.file_state = "hidden"
+    attachment.filename = "exported file"
+    attachment.save!
+
+    @course.create_attachment(attachment, "some, csv, data, up, in, here")
+    expect(attachment.instfs_uuid).to eq(@uuid)
   end
 end
 
@@ -3081,7 +3303,7 @@ describe Course, 'grade_publishing' do
       expect(lambda { quick_sanity_check(@user, false) }).to raise_error("publishing disallowed for this publishing user")
     end
 
-    it 'should publish csv' do
+    it 'should not publish empty csv' do
       @user = user_with_pseudonym
       @pseudonym.sis_user_id = "U1"
       @pseudonym.account_id = @course.root_account_id
@@ -3097,9 +3319,7 @@ describe Course, 'grade_publishing' do
       @ps.save!
 
       @course.grading_standard_id = 0
-      csv = "publisher_id,publisher_sis_id,course_id,course_sis_id,section_id,section_sis_id,student_id," +
-          "student_sis_id,enrollment_id,enrollment_status,score,grade\n"
-      expect(SSLCommon).to receive(:post_data).with("http://localhost/endpoint", csv, "text/csv", {})
+      expect(SSLCommon).to_not receive(:post_data) # like c'mon dude why send an empty csv file
       @course.publish_final_grades(@user)
     end
 
@@ -4035,10 +4255,10 @@ describe Course do
 
     it "should be preferred if delegated authentication is configured" do
       account = Account.create!
-      account.settings[:open_registration] = true
-      account.save!
       account.authentication_providers.create!(:auth_type => 'cas')
       account.authentication_providers.first.move_to_bottom
+      account.settings[:open_registration] = true
+      account.save!
       course_factory(account: account)
       expect(@course.user_list_search_mode_for(nil)).to eq :preferred
       expect(@course.user_list_search_mode_for(user_factory)).to eq :preferred
@@ -4840,6 +5060,16 @@ describe Course, '#module_items_visible_to' do
     @course.complete!
     expect(@course.module_items_visible_to(@teacher).map(&:title)).to match_array %w(published unpublished)
   end
+
+  context "sharding" do
+    specs_require_sharding
+
+    it "shouldn't kersplud on a different shard" do
+      @shard1.activate do
+        expect(@course.module_items_visible_to(@student).first.title).to eq 'published'
+      end
+    end
+  end
 end
 
 describe Course, '#update_enrolled_users' do
@@ -4889,7 +5119,7 @@ describe Course, "#image" do
   it "returns the download_url for a course file if image_id is set" do
     @course.image_id = @attachment.id
     @course.save!
-    expect(@course.image).to eq @attachment.download_url
+    expect(@course.image).to eq @attachment.public_download_url
   end
 
   it "returns nil if image_id and image_url are not set" do

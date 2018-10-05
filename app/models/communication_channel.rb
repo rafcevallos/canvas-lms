@@ -51,13 +51,13 @@ class CommunicationChannel < ActiveRecord::Base
   TYPE_SMS      = 'sms'
   TYPE_TWITTER  = 'twitter'
   TYPE_PUSH     = 'push'
-  TYPE_YO       = 'yo'
 
   RETIRE_THRESHOLD = 1
 
   def self.country_codes
     # [country code, name, true if email should be used instead of Twilio]
     [
+      ['93',   I18n.t('Afghanistan (+93)'),            false],
       ['54',   I18n.t('Argentina (+54)'),              false],
       ['61',   I18n.t('Australia (+61)'),              false],
       ['43',   I18n.t('Austria (+43)'),                false],
@@ -87,6 +87,7 @@ class CommunicationChannel < ActiveRecord::Base
       ['972',  I18n.t('Israel (+972)'),                false],
       ['39',   I18n.t('Italy (+39)'),                  false],
       ['81',   I18n.t('Japan (+81)'),                  false],
+      ['7',    I18n.t('Kazakhstan (+7)'),              false],
       ['254',  I18n.t('Kenya (+254)'),                 false],
       ['352',  I18n.t('Luxembourg (+352)'),            false],
       ['60',   I18n.t('Malaysia (+60)'),               false],
@@ -103,6 +104,7 @@ class CommunicationChannel < ActiveRecord::Base
       ['48',   I18n.t('Poland (+48)'),                 false],
       ['974',  I18n.t('Qatar (+974)'),                 false],
       ['7',    I18n.t('Russia (+7)'),                  false],
+      ['250',  I18n.t('Rwanda (+250)'),                false],
       ['966',  I18n.t('Saudi Arabia (+966)'),          false],
       ['65',   I18n.t('Singapore (+65)'),              false],
       ['27',   I18n.t('South Africa (+27)'),           false],
@@ -254,16 +256,12 @@ class CommunicationChannel < ActiveRecord::Base
       Pseudonym.where(:sis_communication_channel_id => self).exists?
   end
 
-  # Return the 'path' for simple communication channel types like email and sms. For
-  # Yo and Twitter, return the user's configured user_name for the service.
+  # Return the 'path' for simple communication channel types like email and sms.
+  # For Twitter, return the user's configured user_name for the service.
   def path_description
     if self.path_type == TYPE_TWITTER
       res = self.user.user_services.for_service(TYPE_TWITTER).first.service_user_name rescue nil
       res ||= t :default_twitter_handle, 'Twitter Handle'
-      res
-    elsif self.path_type == TYPE_YO
-      res = self.user.user_services.for_service(TYPE_YO).first.service_user_name rescue nil
-      res ||= t :default_yo_name, 'Yo Name'
       res
     elsif self.path_type == TYPE_PUSH
       t 'For All Devices'
@@ -372,9 +370,8 @@ class CommunicationChannel < ActiveRecord::Base
     rank_order = [TYPE_EMAIL, TYPE_SMS, TYPE_PUSH]
     # Add twitter and yo (in that order) if the user's account is setup for them.
     rank_order << TYPE_TWITTER if twitter_service
-    rank_order << TYPE_YO unless user.user_services.for_service(CommunicationChannel::TYPE_YO).empty?
     self.unretired.where('communication_channels.path_type IN (?)', rank_order).
-      order("#{self.rank_sql(rank_order, 'communication_channels.path_type')} ASC, communication_channels.position asc").to_a
+      order(Arel.sql("#{self.rank_sql(rank_order, 'communication_channels.path_type')} ASC, communication_channels.position asc")).to_a
   end
 
   scope :include_policies, -> { preload(:notification_policies) }
@@ -443,7 +440,7 @@ class CommunicationChannel < ActiveRecord::Base
 
   # This is setup as a default in the database, but this overcomes misspellings.
   def assert_path_type
-    valid_types = [TYPE_EMAIL, TYPE_SMS, TYPE_TWITTER, TYPE_PUSH, TYPE_YO]
+    valid_types = [TYPE_EMAIL, TYPE_SMS, TYPE_TWITTER, TYPE_PUSH]
     self.path_type = TYPE_EMAIL unless valid_types.include?(path_type)
     true
   end

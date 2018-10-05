@@ -10,3 +10,4 @@
 
 # TODO: add other linter scripts
 script/tatl_tael
+yarn workspace-run lint

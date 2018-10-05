@@ -18,29 +18,38 @@
 
 import React from 'react';
 import { shallow } from 'enzyme';
-import CoursesPane from 'jsx/account_course_user_search/CoursesPane';
-import CoursesStore from 'jsx/account_course_user_search/CoursesStore';
+import CoursesPane from 'jsx/account_course_user_search/components/CoursesPane';
+import CoursesStore from 'jsx/account_course_user_search/store/CoursesStore';
+import TermsStore from 'jsx/account_course_user_search/store/TermsStore';
+import AccountsTreeStore from 'jsx/account_course_user_search/store/AccountsTreeStore';
 
+const stores = [CoursesStore, TermsStore, AccountsTreeStore]
+
+let wrapper
 QUnit.module('Account Course User Search CoursesPane View', {
   setup () {
-    CoursesStore.reset({ accountId: '1' });
+    stores.forEach(store => store.reset({accountId: '1'}))
+    wrapper = shallow(
+      <CoursesPane
+        accountId="1"
+        roles={[{id: '1' }]}
+        queryParams={{}}
+        onUpdateQueryParams={function(){}}
+      />
+    )
   },
   teardown () {
-    CoursesStore.reset({});
+    stores.forEach(store => store.reset({}))
   }
 });
 
 test('onUpdateFilters calls debouncedApplyFilters after updating state', () => {
-  const wrapper = shallow(
-    <CoursesPane
-      accountId="1"
-      roles={[{id: '1' }]}
-      queryParams={{}}
-      onUpdateQueryParams={function(){}}
-    />
-  );
   const instance = wrapper.instance();
   const spy = sinon.spy(instance, 'debouncedApplyFilters');
   instance.onUpdateFilters();
   ok(spy.called);
 });
+
+test('have an h1 on the page', () => {
+  equal(wrapper.find('h1').length, 1, 'There is one H1 on the page')
+})

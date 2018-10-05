@@ -294,6 +294,39 @@ module Lti
     end
 
     describe "#variable expansions" do
+      context '$com.instructure.Assignment.anonymous_grading' do
+        let(:exp_hash) { {test: '$com.instructure.Assignment.anonymous_grading'} }
+
+        it 'is true if the assignment has anonymous grading on' do
+          assignment.anonymous_grading = true
+          variable_expander = VariableExpander.new(
+            root_account,
+            account,
+            controller,
+            current_user: user,
+            tool: tool,
+            assignment: assignment
+          )
+
+          variable_expander.expand_variables!(exp_hash)
+          expect(exp_hash[:test]).to eq true
+        end
+
+        it 'is false if the assignment does not have anonymous grading on' do
+          variable_expander = VariableExpander.new(
+            root_account,
+            account,
+            controller,
+            current_user: user,
+            tool: tool,
+            assignment: assignment
+          )
+
+          variable_expander.expand_variables!(exp_hash)
+          expect(exp_hash[:test]).to eq false
+        end
+      end
+
       it 'has a substitution for com.instructure.Assignment.lti.id' do
         exp_hash = {test: '$com.instructure.Assignment.lti.id'}
         variable_expander.expand_variables!(exp_hash)
@@ -596,6 +629,106 @@ module Lti
         end
       end
 
+      context 'when launching from a group assignment' do
+        let(:group) { group_category.groups.create!(name: 'test', context: assignment_course) }
+        let(:group_category) { GroupCategory.create!(name: 'test', context: assignment_course) }
+        let(:new_assignment) { assignment_model(course: assignment_course) }
+        let(:assignment_course) do
+          c = course_model(account: account)
+          c.save!
+          c
+        end
+        let(:variable_expander) do
+          VariableExpander.new(
+            root_account,
+            account,
+            controller,
+            current_user: user,
+            tool: tool,
+            assignment: new_assignment
+          )
+        end
+
+        before do
+          group.update_attributes!(users: [user])
+          new_assignment.update_attributes!(group_category: group_category)
+        end
+
+        shared_examples 'a safe expansion when assignment is blank' do
+          let(:expansion) { raise 'override in spec' }
+          let(:variable_expander) do
+            VariableExpander.new(
+              root_account,
+              account,
+              controller,
+              current_user: user,
+              tool: tool
+            )
+          end
+
+          it 'returns the variable if no Assignment is present' do
+            exp_hash = {test: expansion}
+            variable_expander.expand_variables!(exp_hash)
+            expect(exp_hash[:test]).to eq expansion
+          end
+        end
+
+        shared_examples 'a safe expansion when user is blank' do
+          let(:expansion) { raise 'override in spec' }
+          let(:variable_expander) do
+            VariableExpander.new(
+              root_account,
+              account,
+              controller,
+              current_user: user,
+              tool: tool
+            )
+          end
+
+          it 'returns the variable if no User is present' do
+            exp_hash = {test: expansion}
+            variable_expander.expand_variables!(exp_hash)
+            expect(exp_hash[:test]).to eq expansion
+          end
+        end
+
+        describe 'com.instructure.Group.id' do
+          let(:expansion_string) { '$com.instructure.Group.id' }
+
+          it_behaves_like 'a safe expansion when assignment is blank' do
+            let(:expansion) { expansion_string }
+          end
+
+          it_behaves_like 'a safe expansion when user is blank' do
+            let(:expansion) { expansion_string }
+          end
+
+          it 'has a substitution for com.instructure.Group.id' do
+            exp_hash = {test: expansion_string}
+            variable_expander.expand_variables!(exp_hash)
+            expect(exp_hash[:test]).to eq group.id
+          end
+        end
+
+        describe 'com.instructure.Group.name' do
+          let(:expansion_string) { '$com.instructure.Group.name' }
+
+          it_behaves_like 'a safe expansion when assignment is blank' do
+            let(:expansion) { expansion_string }
+          end
+
+          it_behaves_like 'a safe expansion when user is blank' do
+            let(:expansion) { expansion_string }
+          end
+
+          it 'has a substitution for com.instructure.Group.name' do
+            exp_hash = {test: expansion_string}
+            variable_expander.expand_variables!(exp_hash)
+            expect(exp_hash[:test]).to eq group.name
+          end
+        end
+      end
+
       context 'context is a course' do
         let(:variable_expander) { VariableExpander.new(root_account, course, controller, current_user: user) }
 
@@ -672,6 +805,16 @@ module Lti
           expect(exp_hash[:test]).to eq 'teacher,student'
         end
 
+        it 'has substitution for $com.Instructure.membership.roles' do
+          allow(Lti::SubstitutionsHelper).to receive(:new).and_return(substitution_helper)
+          allow(substitution_helper).to receive(:current_canvas_roles_lis_v2).and_return(
+            'http://purl.imsglobal.org/vocab/lis/v2/institution/person#Student'
+          )
+          exp_hash = {test: '$com.Instructure.membership.roles'}
+          variable_expander.expand_variables!(exp_hash)
+          expect(exp_hash[:test]).to eq 'http://purl.imsglobal.org/vocab/lis/v2/institution/person#Student'
+        end
+
         it 'has substitution for $Canvas.membership.concludedRoles' do
           allow(Lti::SubstitutionsHelper).to receive(:new).and_return(substitution_helper)
           allow(substitution_helper).to receive(:concluded_lis_roles).and_return('learner')
@@ -708,6 +851,51 @@ module Lti
           exp_hash = {test: '$com.instructure.contextLabel'}
           variable_expander.expand_variables!(exp_hash)
           expect(exp_hash[:test]).to eq course.course_code
+        end
+
+        context 'when the course has groups' do
+          let(:course_with_groups) do
+            course = variable_expander.context
+            course.save!
+            course
+          end
+
+          let!(:group_one) { course_with_groups.groups.create!(name: 'Group One') }
+          let!(:group_two) { course_with_groups.groups.create!(name: 'Group Two') }
+
+          describe '$com.instructure.Course.groupIds' do
+            it 'has substitution' do
+              exp_hash = {test: '$com.instructure.Course.groupIds'}
+              variable_expander.expand_variables!(exp_hash)
+              expected_ids = [group_one, group_two].map { |g| g.id.to_s }
+              expect(exp_hash[:test].split(',')).to match_array expected_ids
+            end
+
+            it 'does not include groups outside of the course' do
+              second_course = variable_expander.context.dup
+              second_course.update!(sis_source_id: SecureRandom.uuid)
+              second_course.groups.create!(name: 'Group Three')
+              exp_hash = {test: '$com.instructure.Course.groupIds'}
+              variable_expander.expand_variables!(exp_hash)
+              expected_ids = [group_two, group_one].map { |g| g.id.to_s }
+              expect(exp_hash[:test].split(',')).to match_array expected_ids
+            end
+
+            it 'only includes active group ids' do
+              group_one.update!(workflow_state: 'deleted')
+              exp_hash = {test: '$com.instructure.Course.groupIds'}
+              variable_expander.expand_variables!(exp_hash)
+              expect(exp_hash[:test]).to eq group_two.id.to_s
+            end
+
+            it 'guards against the course being nil' do
+              no_course_expander = VariableExpander.new(root_account, nil, controller, current_user: user)
+              exp_hash = {test: '$com.instructure.Course.groupIds'}
+              expect do
+                no_course_expander.expand_variables!(exp_hash)
+              end.not_to raise_exception
+            end
+          end
         end
       end
 

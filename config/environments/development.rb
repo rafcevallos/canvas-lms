@@ -33,12 +33,20 @@ environment_configuration(defined?(config) && config) do |config|
   # Really do care if the message wasn't sent.
   config.action_mailer.raise_delivery_errors = true
 
-  if ENV['REMOTE_DEBUGGING_ENABLED']
-    require 'byebug/core'
-    Byebug.start_server('0.0.0.0', 0)
-    puts "Byebug listening on 0.0.0.0:#{Byebug.actual_port}" # rubocop:disable Rails/Output
-    byebug_port_file = File.join(Dir.tmpdir, 'byebug.port')
-    File.write(byebug_port_file, Byebug.actual_port)
+  # allow debugging only in development environment by default
+  #
+  # Option to DISABLE_RUBY_DEBUGGING is helpful IDE-based debugging.
+  # The ruby debug gems conflict with the IDE-based debugger gem.
+  # Set this option in your dev environment to disable.
+  unless ENV['DISABLE_RUBY_DEBUGGING']
+    require 'byebug'
+    if ENV['REMOTE_DEBUGGING_ENABLED']
+      require 'byebug/core'
+      Byebug.start_server('0.0.0.0', 0)
+      puts "Byebug listening on 0.0.0.0:#{Byebug.actual_port}" # rubocop:disable Rails/Output
+      byebug_port_file = File.join(Dir.tmpdir, 'byebug.port')
+      File.write(byebug_port_file, Byebug.actual_port)
+    end
   end
 
   # Print deprecation notices to the Rails logger
@@ -52,6 +60,10 @@ environment_configuration(defined?(config) && config) do |config|
   config.active_record.schema_format = :sql
 
   config.eager_load = false
+
+  config.after_initialize do
+    require_relative 'bullet'
+  end
 
   # eval <env>-local.rb if it exists
   Dir[File.dirname(__FILE__) + "/" + File.basename(__FILE__, ".rb") + "-*.rb"].each { |localfile| eval(File.new(localfile).read, nil, localfile, 1) }

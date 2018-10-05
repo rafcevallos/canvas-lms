@@ -24,6 +24,8 @@ require_relative '../helpers/google_drive_common'
 require_relative '../helpers/groups_common'
 require_relative '../helpers/groups_shared_examples'
 require_relative '../helpers/wiki_and_tiny_common'
+require_relative '../discussions/pages/discussions_index_page'
+require_relative '../announcements/announcement_index_page'
 
 describe "groups" do
   include_context "in-process server selenium tests"
@@ -45,6 +47,7 @@ describe "groups" do
       course_with_student({user: @student, :active_course => true, :active_enrollment => true})
       enable_all_rcs @course.account
       @course.enroll_teacher(@teacher).accept!
+      # This line below is terrible
       group_test_setup(4,1,1)
       # adds all students to the group
       add_users_to_group(@students + [@student],@testgroup.first)
@@ -58,40 +61,27 @@ describe "groups" do
     #-------------------------------------------------------------------------------------------------------------------
     describe "announcements page" do
       it "should not allow group members to edit someone else's announcement", priority: "1", test_id: 327111 do
-        create_group_announcement_manually("Announcement by #{@user.name}",'sup')
-        user_session(@students.first)
-        get announcements_page
-        expect(ff('.discussion-topic').size).to eq 1
-        f('.discussion-title').click
+        announcement = @testgroup.first.announcements.create!(
+          :title => "foobers",
+          :user => @students.first,
+          :message => "sup",
+          :workflow_state => "published"
+        )
+        user_session(@student)
+        get DiscussionsIndex.individual_discussion_url(announcement)
         expect(f("#content")).not_to contain_css('.edit-btn')
       end
 
       it "should allow all group members to see announcements", priority: "1", test_id: 273613 do
-        @announcement = @testgroup.first.announcements.create!(title: 'Group Announcement', message: 'Group',user: @teacher)
-        # Verifying with a few different group members should be enough to ensure all group members can see it
-        verify_member_sees_announcement
-
-        user_session(@students.first)
-        verify_member_sees_announcement
-      end
-    end
-
-    #-------------------------------------------------------------------------------------------------------------------
-    describe "discussions page" do
-      it "should allow discussions to be created within a group", priority: "1", test_id: 273615 do
-        get discussions_page
-        expect_new_page_load { f('#new-discussion-btn').click }
-        # This creates the discussion and also tests its creation
-        edit_topic('from a student', 'tell me a story')
-      end
-
-      it "should have two options when creating a discussion", priority: "1", test_id: 273617 do
-        get discussions_page
-        expect_new_page_load { f('#new-discussion-btn').click }
-        expect(f('#threaded')).to be_displayed
-        expect(f('#allow_rating')).to be_displayed
-        # Shouldn't be Enable Podcast Feed option
-        expect(f("#content")).not_to contain_css('#podcast_enabled')
+        @announcement = @testgroup.first.announcements.create!(
+          title: 'Group Announcement',
+          message: 'Group',
+          user: @teacher
+        )
+        AnnouncementIndex.visit_groups_index(@testgroup.first)
+        expect(ff('.ic-announcement-row').size).to eq 1
+        expect_new_page_load { ff('.ic-announcement-row')[0].click }
+        expect(f('.discussion-title')).to include_text(@announcement.title)
       end
     end
 

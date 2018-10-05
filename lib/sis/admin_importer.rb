@@ -19,9 +19,9 @@
 module SIS
   class AdminImporter < BaseImporter
 
-    def process(messages)
+    def process
       start = Time.zone.now
-      importer = Work.new(@batch, @root_account, @logger, messages)
+      importer = Work.new(@batch, @root_account, @logger)
 
       AccountUser.skip_touch_callbacks(:user) do
         User.skip_updating_account_associations do
@@ -29,28 +29,27 @@ module SIS
         end
       end
 
-      if @batch
-        User.update_account_associations(importer.account_users_to_update_associations.to_a)
-        importer.account_users_to_set_batch_id.to_a.in_groups_of(1000, false) do |batch|
-          AccountUser.where(id: batch).update_all(sis_batch_id: @batch.id, updated_at: Time.now.utc)
-        end
-        @logger.debug("admin imported in #{Time.zone.now - start} seconds")
+      User.update_account_associations(importer.account_users_to_update_associations.to_a)
+      importer.account_users_to_set_batch_id.to_a.in_groups_of(1000, false) do |admins|
+        AccountUser.where(id: admins).update_all(sis_batch_id: @batch.id, updated_at: Time.now.utc)
       end
+      SisBatchRollBackData.bulk_insert_roll_back_data(importer.roll_back_data)
+      @logger.debug("admin imported in #{Time.zone.now - start} seconds")
       importer.success_count
     end
 
     class Work
-      attr_accessor :success_count,
+      attr_accessor :success_count, :roll_back_data,
                     :account_users_to_update_associations,
                     :account_users_to_set_batch_id
 
-      def initialize(batch, root_account, logger, messages)
+      def initialize(batch, root_account, logger)
         @batch = batch
         @root_account = root_account
         @account = root_account
         @logger = logger
-        @messages = messages
         @success_count = 0
+        @roll_back_data = []
         @account_users_to_update_associations = Set.new
         @account_users_to_set_batch_id = Set.new
         @account_roles_by_account_id = {}
@@ -65,6 +64,7 @@ module SIS
 
         state = status.downcase.strip
         raise ImportError, "Invalid status #{status} for admin" unless %w(active deleted).include? state
+        return if @batch.skip_deletes? && state == 'deleted'
 
         get_account(account_id)
         raise ImportError, "Invalid account_id given for admin" unless @account
@@ -102,6 +102,8 @@ module SIS
         if admin.new_record? || admin.workflow_state_changed?
           @account_users_to_update_associations.add(user.id)
           admin.save!
+          data = SisBatchRollBackData.build_data(sis_batch: @batch, context: admin)
+          @roll_back_data << data if data
         end
         @account_users_to_set_batch_id.add(admin.id)
       end

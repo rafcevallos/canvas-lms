@@ -60,7 +60,10 @@ describe ContentMigration do
 
       page1_to = @copy_to.wiki_pages.where(migration_id: mig_id(page1)).first
       page2_to = @copy_to.wiki_pages.where(migration_id: mig_id(page2)).first
-      expect(page2_to.body).to eq body % [@copy_to.id, page1_to.url]
+
+      new_body = body % [@copy_to.id, page1_to.url]
+      expect(page2_to.body).to eq new_body
+      expect(page2_to.versions.first.model.body).to eq new_body
     end
 
     it "should find and fix wiki links by title or id" do
@@ -91,6 +94,12 @@ describe ContentMigration do
 
       vanilla_page_to = @copy_to.wiki_pages.where(migration_id: mig_id(vanilla_page_from)).take!
       expect(vanilla_page_to.assignment).to be_nil
+
+      # ensure assignment is unlinked
+      @page.assignment = nil
+      @page.save!
+      run_course_copy
+      expect(page_to.reload.assignment).to be_nil
     end
 
     it "re-imports updated/deleted page" do
@@ -182,9 +191,9 @@ describe ContentMigration do
       end
 
       it "should set default view to modules if wiki front page is missing" do
+        @copy_from.wiki.set_front_page_url!('haha not here')
         @copy_from.default_view = 'wiki'
         @copy_from.save!
-        @copy_from.wiki.set_front_page_url!('haha not here')
 
         run_course_copy
 

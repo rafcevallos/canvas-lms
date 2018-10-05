@@ -95,19 +95,17 @@ module Context
       context = context.respond_to?(:account) ? context.account : context.parent_account
       context_codes << context.asset_string if context
     end
-    codes_order = {}
-    context_codes.each_with_index{|c, idx| codes_order[c] = idx }
     associations = RubricAssociation.bookmarked.for_context_codes(context_codes).include_rubric
-    associations = associations.to_a.select{|a| a.rubric }.uniq{|a| [a.rubric_id, a.context_code] }
-    contexts = associations.group_by{|a| a.context_code }.map do |code, associations|
-      context_name = associations.first.context_name
-      res = {
-        :rubrics => associations.length,
+    associations = associations.to_a.select(&:rubric).uniq{|a| [a.rubric_id, a.context_code] }
+    contexts = associations.group_by(&:context_code).map do |code, code_associations|
+      context_name = code_associations.first.context_name
+      {
+        :rubrics => code_associations.length,
         :context_code => code,
         :name => context_name
       }
     end
-    contexts.sort_by{|c| codes_order[c[:context_code]] || CanvasSort::Last }
+    Canvas::ICU.collate_by(contexts) { |r| r[:name] }
   end
 
   def active_record_types
@@ -160,23 +158,22 @@ module Context
     "#{record.context_type.underscore}_#{record.context_id}"
   end
 
-  def self.find_polymorphic(context_type, context_id)
-    klass_name = context_type.classify.to_sym
-    if CONTEXT_TYPES.include?(klass_name)
-      type = Object.const_get(klass_name, false)
-      type.find(context_id)
-    else
-      nil
-    end
-  rescue => e
-    nil
+  def self.find_by_asset_string(string)
+    from_context_codes([string]).first
   end
 
-  def self.find_by_asset_string(string)
-    opts = string.split("_", -1)
-    id = opts.pop
-    type = opts.join('_')
-    Context.find_polymorphic(type, id)
+  def self.from_context_codes(context_codes)
+    contexts = {}
+    context_codes.each do |cc|
+      type, _, id = cc.rpartition('_')
+      if CONTEXT_TYPES.include?(type.camelize.to_sym)
+        contexts[type.camelize] = [] unless contexts[type.camelize]
+        contexts[type.camelize] << id
+      end
+    end
+    contexts.reduce([]) do |memo, (context, ids)|
+      memo + context.constantize.where(id: ids)
+    end
   end
 
   def self.asset_type_for_string(string)
@@ -208,8 +205,8 @@ module Context
     name = asset.display_name.presence if asset.respond_to?(:display_name)
     name ||= asset.title.presence if asset.respond_to?(:title)
     name ||= asset.short_description.presence if asset.respond_to?(:short_description)
-    name ||= asset.name
-    name
+    name ||= asset.name if asset.respond_to?(:name)
+    name || ''
   end
 
   def self.get_account(context)
@@ -244,5 +241,14 @@ module Context
 
   def nickname_for(_user, fallback = :name)
     self.send fallback if fallback
+  end
+
+  def self.last_updated_at(klass, ids)
+    raise ArgumentError unless CONTEXT_TYPES.include?(klass.class_name.to_sym)
+    klass.where(id: ids)
+         .where.not(updated_at: nil)
+         .order("updated_at DESC")
+         .limit(1)
+         .pluck(:updated_at)&.first
   end
 end

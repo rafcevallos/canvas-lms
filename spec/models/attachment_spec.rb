@@ -43,7 +43,7 @@ describe Attachment do
 
   end
 
-  context "authenticated_url" do
+  context "public_url" do
     before :each do
       local_storage!
     end
@@ -54,12 +54,12 @@ describe Attachment do
 
     it "should return http as the protocol by default" do
       attachment_with_context(@course)
-      expect(@attachment.authenticated_url).to match(/^http:\/\//)
+      expect(@attachment.public_url).to match(/^http:\/\//)
     end
 
     it "should return the protocol if specified" do
       attachment_with_context(@course)
-      expect(@attachment.authenticated_url(:secure => true)).to match(/^https:\/\//)
+      expect(@attachment.public_url(:secure => true)).to match(/^https:\/\//)
     end
 
     context "for a quiz submission upload" do
@@ -67,12 +67,12 @@ describe Attachment do
         quiz = @course.quizzes.create
         submission = Quizzes::SubmissionManager.new(quiz).find_or_create_submission(user_model)
         attachment = attachment_with_context(submission)
-        expect(get(attachment.authenticated_url)).to be_routable
+        expect(get(attachment.public_url)).to be_routable
       end
     end
   end
 
-  context "authenticated_url InstFS storage" do
+  context "public_url InstFS storage" do
     before :once do
       user_model
     end
@@ -85,24 +85,24 @@ describe Attachment do
     end
 
     it "should get url from InstFS when attachment has instfs_uuid" do
-      @attachment.authenticated_url
+      @attachment.public_url
       expect(InstFS).to have_received(:authenticated_url)
     end
 
     it "should still get url from InstFS when attachment has instfs_uuid and instfs is later disabled" do
       allow(InstFS).to receive(:enabled?).and_return false
-      @attachment.authenticated_url
+      @attachment.public_url
       expect(InstFS).to have_received(:authenticated_url)
     end
 
     it "should not get url from InstFS when instfs is enabled but attachment lacks instfs_uuid" do
       @attachment.instfs_uuid = nil
-      @attachment.authenticated_url
+      @attachment.public_url
       expect(InstFS).not_to have_received(:authenticated_url)
     end
   end
 
-  context "authenticated_url s3_storage" do
+  context "public_url s3_storage" do
     before :each do
       s3_storage!
     end
@@ -110,7 +110,7 @@ describe Attachment do
     it "should give back a signed s3 url" do
       a = attachment_model
       s3object = a.s3object
-      expect(a.authenticated_url(expires_in: 1.day)).to match(/^https:\/\//)
+      expect(a.public_url(expires_in: 1.day)).to match(/^https:\/\//)
       a.destroy_permanently!
     end
   end
@@ -480,7 +480,7 @@ describe Attachment do
       a = attachment_model(uploaded_data: default_uploaded_data)
       expect(a.content_type).to eq 'application/msword'
       a.destroy_content_and_replace
-      expect(a.content_type).to eq 'unknown/unknown'
+      expect(a.content_type).to eq 'application/pdf'
     end
 
     it "should also destroy thumbnails" do
@@ -558,11 +558,21 @@ describe Attachment do
     shared_examples_for "purgatory" do
       it 'should save file in purgatory and then restore and back again' do
         a = attachment_model(uploaded_data: default_uploaded_data)
-        filename = a.filename
+        old_filename = a.filename
+        old_content_type = a.content_type
         a.destroy_content_and_replace
         purgatory = Purgatory.where(attachment_id: a).take
-        expect(purgatory.old_filename).to eq filename
+        expect(purgatory.old_filename).to eq old_filename
+        expect(purgatory.old_display_name).to eq old_filename
+        expect(purgatory.old_content_type).to eq old_content_type
+        a.reload
+        expect(a.filename).to eq 'file_removed.pdf'
+        expect(a.display_name).to eq 'file_removed.pdf'
         a.resurrect_from_purgatory
+        a.reload
+        expect(a.filename).to eq old_filename
+        expect(a.display_name).to eq old_filename
+        expect(a.content_type).to eq old_content_type
         expect(purgatory.reload.workflow_state).to eq 'restored'
         a.destroy_content_and_replace
         expect(purgatory.reload.workflow_state).to eq 'active'
@@ -1009,6 +1019,19 @@ describe Attachment do
       expect(existing_files).not_to be_include(new_name)
       expect(new_name).to match(%r{^/a/b/b[^.]+\.txt})
     end
+
+    it "deals with missing extensions" do
+      expect(Attachment.make_unique_filename('blah', ['blah'])).to eq 'blah-1'
+    end
+
+    it "puts the uniquifier before double extensions" do
+      expect(Attachment.make_unique_filename('blah.tar.bz2', ['blah.tar.bz2'])).to eq 'blah-1.tar.bz2'
+    end
+
+    it "does not treat numbers after a decimal point as extensions" do
+      expect(Attachment.make_unique_filename('section 11.5.doc', ['section 11.5.doc'])).to eq 'section 11.5-1.doc'
+      expect(Attachment.make_unique_filename('3.3.2018 footage.mp4', ['3.3.2018 footage.mp4'])).to eq '3.3.2018 footage-1.mp4'
+    end
   end
 
   context "download/inline urls" do
@@ -1019,17 +1042,17 @@ describe Attachment do
     it "should work with s3 storage" do
       s3_storage!
       attachment = attachment_with_context(@course, :display_name => 'foo')
-      expect(attachment.download_url).to match(/response-content-disposition=attachment/)
-      expect(attachment.inline_url).to match(/response-content-disposition=inline/)
+      expect(attachment.public_download_url).to match(/response-content-disposition=attachment/)
+      expect(attachment.public_inline_url).to match(/response-content-disposition=inline/)
     end
 
     it 'should allow custom ttl for download_url' do
       attachment = attachment_with_context(@course, :display_name => 'foo')
-      allow(attachment).to receive(:authenticated_url) # allow other calls due to, e.g., save
-      expect(attachment).to receive(:authenticated_url).with(include(:expires_in => 3600.seconds))
-      attachment.download_url
-      expect(attachment).to receive(:authenticated_url).with(include(:expires_in => 2.days))
-      attachment.download_url(2.days)
+      allow(attachment).to receive(:public_url) # allow other calls due to, e.g., save
+      expect(attachment).to receive(:public_url).with(include(:expires_in => 3600.seconds))
+      attachment.public_download_url
+      expect(attachment).to receive(:public_url).with(include(:expires_in => 2.days))
+      attachment.public_download_url(2.days)
     end
 
     it 'should allow custom ttl for root_account' do
@@ -1037,31 +1060,31 @@ describe Attachment do
       root = @course.root_account
       root.settings[:s3_url_ttl_seconds] = 3.days.seconds.to_s
       root.save!
-      expect(attachment).to receive(:authenticated_url).with(include(expires_in: 3.days.to_i.seconds))
-      attachment.download_url
+      expect(attachment).to receive(:public_url).with(include(expires_in: 3.days.to_i.seconds))
+      attachment.public_download_url
     end
 
     it "should include response-content-disposition" do
       attachment = attachment_with_context(@course, :display_name => 'foo')
       allow(attachment).to receive(:authenticated_s3_url) # allow other calls due to, e.g., save
       expect(attachment).to receive(:authenticated_s3_url).with(include(:response_content_disposition => %(attachment; filename="foo"; filename*=UTF-8''foo)))
-      attachment.download_url
+      attachment.public_download_url
       expect(attachment).to receive(:authenticated_s3_url).with(include(:response_content_disposition => %(inline; filename="foo"; filename*=UTF-8''foo)))
-      attachment.inline_url
+      attachment.public_inline_url
     end
 
     it "should use the display_name, not filename, in the response-content-disposition" do
       attachment = attachment_with_context(@course, :filename => 'bar', :display_name => 'foo')
       allow(attachment).to receive(:authenticated_s3_url) # allow other calls due to, e.g., save
       expect(attachment).to receive(:authenticated_s3_url).with(include(:response_content_disposition => %(attachment; filename="foo"; filename*=UTF-8''foo)))
-      attachment.download_url
+      attachment.public_download_url
     end
 
     it "should http quote the filename in the response-content-disposition if necessary" do
       attachment = attachment_with_context(@course, :display_name => 'fo"o')
       allow(attachment).to receive(:authenticated_s3_url) # allow other calls due to, e.g., save
       expect(attachment).to receive(:authenticated_s3_url).with(include(:response_content_disposition => %(attachment; filename="fo\\"o"; filename*=UTF-8''fo%22o)))
-      attachment.download_url
+      attachment.public_download_url
     end
 
     it "should sanitize filename with iconv" do
@@ -1069,14 +1092,14 @@ describe Attachment do
       sanitized_filename = Iconv.conv("ASCII//TRANSLIT//IGNORE", "UTF-8", a.display_name)
       allow(a).to receive(:authenticated_s3_url)
       expect(a).to receive(:authenticated_s3_url).with(include(:response_content_disposition => %(attachment; filename="#{sanitized_filename}"; filename*=UTF-8''%E7%B3%9F%E7%B3%95.pdf)))
-      a.download_url
+      a.public_download_url
     end
 
     it "should escape all non-alphanumeric characters in the utf-8 filename" do
       attachment = attachment_with_context(@course, :display_name => '"This file[0] \'{has}\' \# awesome `^<> chars 100%,|<-pipe"')
       allow(attachment).to receive(:authenticated_s3_url)
       expect(attachment).to receive(:authenticated_s3_url).with(include(:response_content_disposition => %(attachment; filename="\\\"This file[0] '{has}' \\# awesome `^<> chars 100%,|<-pipe\\\""; filename*=UTF-8''%22This%20file%5B0%5D%20%27%7Bhas%7D%27%20%5C%23%20awesome%20%60%5E%3C%3E%20chars%20100%25%2C%7C%3C%2Dpipe%22)))
-      attachment.download_url
+      attachment.public_download_url
     end
   end
 
@@ -1098,7 +1121,7 @@ describe Attachment do
     end
 
     it "should immediately infer the namespace if not yet set" do
-      Attachment.domain_namespace = nil
+      Attachment.current_root_account = nil
       @a = Attachment.new(:context => @course)
       expect(@a).to be_new_record
       expect(@a.read_attribute(:namespace)).to be_nil
@@ -1108,7 +1131,7 @@ describe Attachment do
     end
 
     it "should not infer the namespace if it's not a new record" do
-      Attachment.domain_namespace = nil
+      Attachment.current_root_account = nil
       attachment_model(:context => submission_model)
       expect(@attachment).not_to be_new_record
       expect(@attachment.read_attribute(:namespace)).to be_nil
@@ -1120,7 +1143,7 @@ describe Attachment do
       specs_require_sharding
 
       it "stores a local id on the birth shard" do
-        Attachment.domain_namespace = Account.default
+        Attachment.current_root_account = Account.default
         att = Attachment.new
         att.infer_namespace
         expect(att.namespace).to eq Account.default.asset_string
@@ -1135,7 +1158,7 @@ describe Attachment do
         att = nil
         @shard1.activate do
           a = Account.create!
-          Attachment.domain_namespace = a
+          Attachment.current_root_account = a
           att = Attachment.new
           att.infer_namespace
           expect(att.namespace).to eq a.global_asset_string
@@ -1157,7 +1180,7 @@ describe Attachment do
       end
 
       it "stores ID for a cross-shard attachment" do
-        Attachment.domain_namespace = Account.default
+        Attachment.current_root_account = Account.default
         att = nil
         @shard1.activate do
           att = Attachment.new
@@ -1247,7 +1270,7 @@ describe Attachment do
 
     before :each do
       s3_storage!
-      Attachment.domain_namespace = @old_account.file_namespace
+      Attachment.current_root_account = @old_account
       @root = attachment_model(filename: 'unknown 2.loser')
       @child = attachment_model(:root_attachment => @root)
 
@@ -1383,44 +1406,11 @@ describe Attachment do
     end
   end
 
-  context "thumbnail_url" do
-    context "non-instfs attachment" do
-      it "should be the thumbnail's url" do
-        attachment_model(uploaded_data: stub_png_data)
-        @attachment.thumbnail || @attachment.build_thumbnail.save!
-        expect(@attachment.thumbnail_url).to eq @attachment.thumbnail.cached_s3_url
-      end
-
-      it "should be the thumbnail's url when instfs is enabled" do
-        attachment_model(uploaded_data: stub_png_data)
-        @attachment.thumbnail || @attachment.build_thumbnail.save!
-        allow(InstFS).to receive(:enabled?).and_return true
-        expect(@attachment.thumbnail_url).to eq @attachment.thumbnail.cached_s3_url
-      end
-    end
-
-    context "instfs attachment" do
-      before do
-        allow(InstFS).to receive(:enabled?).and_return true
-        allow(InstFS).to receive(:jwt_secret).and_return 'secret'
-        allow(InstFS).to receive(:app_host).and_return 'instfs'
-      end
-
-      it "should be an instfs thumbnail link when thumbnailable" do
-        attachment_model(instfs_uuid: 'abc', content_type: 'image/png')
-        expect(@attachment.thumbnail_url).to match(%r{/thumbnails/abc})
-      end
-
-      it "should still be an instfs thumbnail link when thumbnailable and instfs is later disabled" do
-        attachment_model(instfs_uuid: 'abc', content_type: 'image/png')
-        allow(InstFS).to receive(:enabled?).and_return false
-        expect(@attachment.thumbnail_url).to match(%r{/thumbnails/abc})
-      end
-
-      it "should be blank when not thumbnailable" do
-        attachment_model(instfs_uuid: 'abc', content_type: 'text/plain')
-        expect(@attachment.thumbnail_url).to be_blank
-      end
+  context "thumbnail_url (non-instfs)" do
+    it "should be the thumbnail's url" do
+      attachment_model(uploaded_data: stub_png_data)
+      @attachment.thumbnail || @attachment.build_thumbnail.save!
+      expect(@attachment.thumbnail_url).to eq @attachment.thumbnail.cached_s3_url
     end
   end
 
@@ -1513,8 +1503,21 @@ describe Attachment do
       e = @course.enroll_student(@student).accept
       @cc = @student.communication_channels.create(:path => "default@example.com")
       @cc.confirm!
+
+      @student_ended = user_model
+      @student_ended.register!
+      @section_ended = @course.course_sections.create!(end_at: Time.zone.now - 1.day)
+      @course.enroll_student(@student_ended, :section => @section_ended).accept
+      @cc_ended = @student_ended.communication_channels.create(:path => "default2@example.com")
+      @cc_ended.confirm!
+
       NotificationPolicy.create(:notification => Notification.create!(:name => 'New File Added'), :communication_channel => @cc, :frequency => "immediately")
       NotificationPolicy.create(:notification => Notification.create!(:name => 'New Files Added'), :communication_channel => @cc, :frequency => "immediately")
+
+      NotificationPolicy.create(:notification => Notification.create!(:name => 'New File Added - ended'),
+                                :communication_channel => @cc_ended, :frequency => "immediately")
+      NotificationPolicy.create(:notification => Notification.create!(:name => 'New Files Added - ended'),
+                                :communication_channel => @cc_ended, :frequency => "immediately")
     end
 
     it "should send a single-file notification" do
@@ -1613,6 +1616,25 @@ describe Attachment do
       expect(Message.where(user_id: @teacher, notification_name: 'New File Added').first).not_to be_nil
     end
 
+    it "should not send notifications to students if the file is unpublished because of usage rights" do
+      @teacher.register!
+      cc = @teacher.communication_channels.create!(:path => "default@example.com")
+      cc.confirm!
+      NotificationPolicy.create!(:notification => Notification.where(name: 'New File Added').first, :communication_channel => cc, :frequency => "immediately")
+
+      @course.enable_feature! :usage_rights_required
+      attachment_model(:uploaded_data => stub_file_data('file.txt', nil, 'text/html'), :content_type => 'text/html')
+      @attachment.set_publish_state_for_usage_rights
+      @attachment.save!
+
+      Timecop.freeze(10.minutes.from_now) { Attachment.do_notifications }
+
+      @attachment.reload
+      expect(@attachment.need_notify).not_to be_truthy
+      expect(Message.where(user_id: @student, notification_name: 'New File Added').first).to be_nil
+      expect(Message.where(user_id: @teacher, notification_name: 'New File Added').first).not_to be_nil
+    end
+
     it "should not send notifications to students if the files navigation is hidden from student view" do
       @teacher.register!
       cc = @teacher.communication_channels.create!(:path => "default@example.com")
@@ -1647,6 +1669,12 @@ describe Attachment do
       @course.save!
       Timecop.freeze(10.minutes.from_now) { Attachment.do_notifications }
       expect(Message.where(user_id: @student, notification_name: 'New File Added').first).to be_nil
+    end
+
+    it "doesn't send notifications for a concluded section in an active course" do
+      attachment_model(:uploaded_data => stub_file_data('file.txt', nil, 'text/html'), :content_type => 'text/html')
+      Timecop.freeze(10.minutes.from_now) { Attachment.do_notifications }
+      expect(Message.where(user_id: @student_ended, notification_name: 'New File Added').first).to be_nil
     end
   end
 
@@ -1715,6 +1743,36 @@ describe Attachment do
   end
 
   context "#open" do
+    include WebMock::API
+
+    context "instfs branch" do
+      before do
+        user_model
+        attachment_model(:context => @user)
+        public_url = 'http://www.example.com/foo'
+        allow(@attachment).to receive(:instfs_hosted?).and_return true
+        allow(@attachment).to receive(:public_url).and_return public_url
+
+        stub_request(:get, public_url).
+          to_return(status: 200, body: "test response body", headers: {})
+      end
+
+      it "should stream data to the block given" do
+        callback = false
+        @attachment.open do |data|
+          expect(data).to eq "test response body"
+          callback = true
+        end
+        expect(callback).to eq true
+      end
+
+      it "should stream to a tempfile without a block given" do
+        file = @attachment.open
+        expect(file).to be_a(Tempfile)
+        expect(file.read).to eq("test response body")
+      end
+    end
+
     context "s3_storage" do
       before do
         s3_storage!
@@ -1852,6 +1910,29 @@ describe Attachment do
       attachment_obj_with_context(Account.default.default_enrollment_term)
       @attachment.folder = nil
       expect(@attachment.full_path).to eq "/#{@attachment.display_name}"
+    end
+  end
+
+  describe ".clone_url_strand" do
+    it "falls back for invalid URLs" do
+      expect(Attachment.clone_url_strand("")).to eq "file_download"
+    end
+
+    it "gives the host for 'local' host" do
+      expect(Attachment.clone_url_strand("http://localhost:9090/image.jpg")).to eq ["file_download", "localhost"]
+    end
+
+    it "gives the full host for simple domain" do
+      expect(Attachment.clone_url_strand("http://google.com/image.jpg")).to eq ["file_download", "google.com"]
+    end
+
+    it "strips subdomains" do
+      expect(Attachment.clone_url_strand("http://cdn.google.com/image.jpg")).to eq ["file_download", "google.com"]
+    end
+
+    it "accepts overrides" do
+      allow(Attachment).to receive(:clone_url_strand_overrides).and_return("cdn.google.com" => "cdn")
+      expect(Attachment.clone_url_strand("http://cdn.google.com/image.jpg")).to eq ["file_download", "cdn"]
     end
   end
 

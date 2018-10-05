@@ -22,7 +22,7 @@ require_relative '../pages/grading_curve_page'
 
 describe "Screenreader Gradebook" do
   include_context 'in-process server selenium tests'
-  include_context 'reusable_course'
+  include_context 'reusable_gradebook_course'
   include GradebookCommon
 
   let(:default_gradebook) { "/courses/#{@course.id}/gradebook/change_gradebook_version?version=2" }
@@ -339,7 +339,7 @@ describe "Screenreader Gradebook" do
     it "shows sections in drop-down", priority: '1', test_id: 615680 do
       sections=[]
       2.times do |i|
-        sections << @course.course_sections.create!(:name => "other section #{i}")
+        sections << @course.course_sections.create!(name: "other section #{i}")
       end
 
       SRGB.visit(@course.id)

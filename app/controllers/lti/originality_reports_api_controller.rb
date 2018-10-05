@@ -160,6 +160,7 @@ module Lti
       else
         @report = OriginalityReport.new(create_report_params)
         if @report.save
+          @report.send_later_if_production(:copy_to_group_submissions!)
           render json: api_json(@report, @current_user, session), status: :created
         else
           render json: @report.errors, status: :bad_request
@@ -206,6 +207,7 @@ module Lti
     # @returns OriginalityReport
     def update
       if @report.update_attributes(update_report_params)
+        @report.send_later_if_production(:copy_to_group_submissions!)
         render json: api_json(@report, @current_user, session)
       else
         render json: @report.errors, status: :bad_request
@@ -356,9 +358,16 @@ module Lti
       verify_submission_attachment(@report.attachment, submission)
     end
 
+    def attachment_in_history?(attachment, submission)
+      submission.submission_history.any? do |s|
+        s.attachment_ids.include?(attachment.id.to_s) ||
+        s.attachment_ids.include?(attachment.global_id.to_s)
+      end
+    end
+
     def verify_submission_attachment(attachment, submission)
       raise ActiveRecord::RecordNotFound if submission.blank? || (attachment_required? && attachment.blank?)
-      if submission.assignment != assignment || (attachment_required? && !submission.attachments.include?(attachment))
+      if submission.assignment != assignment || (attachment_required? && !attachment_in_history?(attachment, submission))
         render_unauthorized_action
       end
     end

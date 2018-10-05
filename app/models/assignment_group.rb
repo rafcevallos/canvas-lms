@@ -26,17 +26,20 @@ class AssignmentGroup < ActiveRecord::Base
   include Canvas::SoftDeletable
 
   attr_readonly :context_id, :context_type
+
+  attr_accessor :saved_by
+
   belongs_to :context, polymorphic: [:course]
   acts_as_list scope: { context: self, workflow_state: 'available' }
   has_a_broadcast_policy
   serialize :integration_data, Hash
 
   has_many :scores, -> { active }
-  has_many :assignments, -> { order('position, due_at, title') }, dependent: :destroy
+  has_many :assignments, -> { order('position, due_at, title') }
 
   has_many :active_assignments, -> {
     where("assignments.workflow_state<>'deleted'").order('assignments.position, assignments.due_at, assignments.title')
-  }, class_name: 'Assignment'
+  }, class_name: 'Assignment', dependent: :destroy
 
   has_many :published_assignments, -> {
     where(workflow_state: 'published').order('assignments.position, assignments.due_at, assignments.title')
@@ -68,8 +71,10 @@ class AssignmentGroup < ActiveRecord::Base
   protected :generate_default_values
 
   def update_student_grades
-    if self.rules_changed? || self.group_weight_changed?
-      self.class.connection.after_transaction_commit { self.context.recompute_student_scores }
+    if self.saved_change_to_rules? || self.saved_change_to_group_weight?
+      unless self.saved_by == :migration
+        self.class.connection.after_transaction_commit { self.context.recompute_student_scores }
+      end
     end
   end
 
@@ -154,7 +159,7 @@ class AssignmentGroup < ActiveRecord::Base
   scope :for_course, lambda { |course| where(:context_id => course, :context_type => 'Course') }
 
   def course_grading_change
-    self.context.grade_weight_changed! if group_weight_changed? && self.context && self.context.group_weighting_scheme == 'percent'
+    self.context.grade_weight_changed! if saved_change_to_group_weight? && self.context && self.context.group_weighting_scheme == 'percent'
     true
   end
 

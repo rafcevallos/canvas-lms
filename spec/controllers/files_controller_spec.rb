@@ -42,7 +42,7 @@ describe FilesController do
   end
 
   def io
-    fixture_file_upload('scribd_docs/doc.doc', 'application/msword', true)
+    fixture_file_upload('docs/doc.doc', 'application/msword', true)
   end
 
   def course_file
@@ -51,6 +51,10 @@ describe FilesController do
 
   def user_file
     @file = factory_with_protected_attributes(@user.attachments, :uploaded_data => io)
+  end
+
+  def account_js_file
+    @file = factory_with_protected_attributes(@account.attachments, :uploaded_data => fixture_file_upload('test.js', 'text/javascript', false))
   end
 
   def folder_file
@@ -101,14 +105,14 @@ describe FilesController do
       user_session(@teacher)
       get 'quota', params: {:course_id => @course.id}
       expect(assigns[:quota]).not_to be_nil
-      expect(response).to be_success
+      expect(response).to be_successful
     end
 
     it "should assign variables for user quota" do
       user_session(@student)
       get 'quota', params: {:user_id => @student.id}
       expect(assigns[:quota]).not_to be_nil
-      expect(response).to be_success
+      expect(response).to be_successful
     end
 
     it "should assign variables for group quota" do
@@ -116,7 +120,7 @@ describe FilesController do
       group_model(:context => @course)
       get 'quota', params: {:group_id => @group.id}
       expect(assigns[:quota]).not_to be_nil
-      expect(response).to be_success
+      expect(response).to be_successful
     end
 
     it "should allow changing group quota" do
@@ -124,7 +128,7 @@ describe FilesController do
       group_model(:context => @course, :storage_quota => 500.megabytes)
       get 'quota', params: {:group_id => @group.id}
       expect(assigns[:quota]).to eq 500.megabytes
-      expect(response).to be_success
+      expect(response).to be_successful
     end
   end
 
@@ -145,7 +149,7 @@ describe FilesController do
     it "should assign variables" do
       user_session(@teacher)
       get 'index', params: {:course_id => @course.id}
-      expect(response).to be_success
+      expect(response).to be_successful
       expect(assigns[:contexts]).not_to be_nil
       expect(assigns[:contexts][0]).to eql(@course)
     end
@@ -156,7 +160,7 @@ describe FilesController do
       f1 = course_folder
       a1 = folder_file
       get 'index', params: {:course_id => @course.id}, :format => 'json'
-      expect(response).to be_success
+      expect(response).to be_successful
       data = json_parse
       expect(data).not_to be_nil
       # order expected
@@ -166,13 +170,13 @@ describe FilesController do
     it "should work for a user context, too" do
       user_session(@student)
       get 'index', params: {:user_id => @student.id}
-      expect(response).to be_success
+      expect(response).to be_successful
     end
 
     it "should work for a group context, too" do
       group_with_user_logged_in(:group_context => Account.default)
       get 'index', params: {:group_id => @group.id}
-      expect(response).to be_success
+      expect(response).to be_successful
     end
 
     it "should not show external tools in a group context" do
@@ -230,12 +234,12 @@ describe FilesController do
 
       it "authorizes users on a remote shard" do
         get 'index', params: {:user_id => @user.global_id}
-        expect(response).to be_success
+        expect(response).to be_successful
       end
 
       it "authorizes users on a remote shard for JSON data" do
         get 'index', params: {:user_id => @user.global_id}, :format => :json
-        expect(response).to be_success
+        expect(response).to be_successful
       end
     end
   end
@@ -254,7 +258,7 @@ describe FilesController do
       it "should allow public access with legacy verifier" do
         allow_any_instance_of(Attachment).to receive(:canvadoc_url).and_return "stubby"
         get 'show', params: {:course_id => @course.id, :id => @file.id, :verifier => @file.uuid}, :format => 'json'
-        expect(response).to be_success
+        expect(response).to be_successful
         expect(json_parse['attachment']).to_not be_nil
         expect(json_parse['attachment']['canvadoc_session_url']).to eq "stubby"
         expect(json_parse['attachment']['md5']).to be_nil
@@ -263,7 +267,7 @@ describe FilesController do
       it "should allow public access with new verifier" do
         verifier = Attachments::Verification.new(@file).verifier_for_user(nil)
         get 'show', params: {:course_id => @course.id, :id => @file.id, :verifier => verifier}, :format => 'json'
-        expect(response).to be_success
+        expect(response).to be_successful
         expect(json_parse['attachment']).to_not be_nil
         expect(json_parse['attachment']['md5']).to be_nil
       end
@@ -273,14 +277,14 @@ describe FilesController do
         session[:require_terms] = true
         verifier = Attachments::Verification.new(@file).verifier_for_user(@teacher)
         get 'show', params: {:course_id => @course.id, :id => @file.id, :verifier => verifier}, :format => 'json'
-        expect(response).to be_success
+        expect(response).to be_successful
       end
     end
 
     it "should assign variables" do
       user_session(@teacher)
       get 'show', params: {:course_id => @course.id, :id => @file.id}
-      expect(response).to be_success
+      expect(response).to be_successful
       expect(assigns[:attachment]).not_to be_nil
       expect(assigns[:attachment]).to eql(@file)
     end
@@ -298,30 +302,30 @@ describe FilesController do
       get 'show', params: {:course_id => @course.id, :id => @file.id, :download => 1, :verifier => @file.uuid, :download_frd => 1}
     end
 
-    it "should remember most recent sf_verifier in session" do
+    it "should remember most recent valid sf_verifier in session" do
       user1 = user_factory(active_all: true)
       file1 = user_file
-      ts1, sf_verifier1 = user1.access_verifier
+      verifier1 = Users::AccessVerifier.generate(user: user1)
 
       user2 = user_factory(active_all: true)
       file2 = user_file
-      ts2, sf_verifier2 = user2.access_verifier
+      verifier2 = Users::AccessVerifier.generate(user: user2)
 
       # first verifier
       user_session(user1)
-      get 'show', params: {:user_id => user1.id, :id => file1.id, :ts => ts1, :sf_verifier => sf_verifier1}
-      expect(response).to be_success
+      get 'show', params: verifier1.merge(id: file1.id)
+      expect(response).to be_successful
 
-      expect(session[:file_access_user_id]).to eq user1.id
+      expect(session[:file_access_user_id]).to eq user1.global_id
       expect(session[:file_access_expiration]).not_to be_nil
       expect(session[:permissions_key]).not_to be_nil
       permissions_key = session[:permissions_key]
 
       # second verifier, should update session
-      get 'show', params: {:user_id => user2.id, :id => @file.id, :ts => ts2, :sf_verifier => sf_verifier2}
-      expect(response).to be_success
+      get 'show', params: verifier2.merge(id: file2.id)
+      expect(response).to be_successful
 
-      expect(session[:file_access_user_id]).to eq user2.id
+      expect(session[:file_access_user_id]).to eq user2.global_id
       expect(session[:file_access_expiration]).not_to be_nil
       expect(session[:permissions_key]).not_to eq permissions_key
       permissions_key = session[:permissions_key]
@@ -329,18 +333,37 @@ describe FilesController do
       # repeat access, even without verifier, should extend expiration (though
       # we can't assert that, because milliseconds) and thus change
       # permissions_key
-      get 'show', params: {:user_id => user2.id, :id => @file.id}
-      expect(response).to be_success
+      get 'show', params: {id: file2.id}
+      expect(response).to be_successful
 
+      expect(session[:permissions_key]).not_to eq permissions_key
+    end
+
+    it "should ignore invalid sf_verifiers" do
+      user = user_factory(active_all: true)
+      file = user_file
+      verifier = Users::AccessVerifier.generate(user: user)
+
+      # first use to establish session
+      get 'show', params: verifier.merge(id: file.id)
+      expect(response).to be_successful
+      permissions_key = session[:permissions_key]
+
+      # second use after verifier expiration but before session expiration.
+      # expired verifier should be ignored but session should still be extended
+      Timecop.freeze((Users::AccessVerifier::TTL_MINUTES + 1).minutes.from_now) do
+        get 'show', params: verifier.merge(id: file.id)
+      end
+      expect(response).to be_successful
       expect(session[:permissions_key]).not_to eq permissions_key
     end
 
     it "should set cache headers for non text files" do
       get 'show', params: {:course_id => @course.id, :id => @file.id, :download => 1, :verifier => @file.uuid, :download_frd => 1}
-      expect(response.header["Cache-Control"]).to include "private, max-age"
+      expect(response.header["Cache-Control"]).to include "private"
+      expect(response.header["Cache-Control"]).to include "max-age=#{1.day.seconds}"
       expect(response.header["Cache-Control"]).not_to include "no-cache"
       expect(response.header["Cache-Control"]).not_to include "no-store"
-      expect(response.header["Cache-Control"]).not_to include "max-age=0"
       expect(response.header["Cache-Control"]).not_to include "must-revalidate"
       expect(response.header).to include("Expires")
       expect(response.header).not_to include("Pragma")
@@ -350,11 +373,9 @@ describe FilesController do
       @file.content_type = "text/html"
       @file.save
       get 'show', params: {:course_id => @course.id, :id => @file.id, :download => 1, :verifier => @file.uuid, :download_frd => 1}
-      expect(response.header["Cache-Control"]).not_to include "private, max-age"
+      expect(response.header["Cache-Control"]).not_to include "private"
       expect(response.header["Cache-Control"]).to include "no-cache"
       expect(response.header["Cache-Control"]).to include "no-store"
-      expect(response.header["Cache-Control"]).to include "max-age=0"
-      expect(response.header["Cache-Control"]).to include "must-revalidate"
       expect(response.header).not_to include("Expires")
       expect(response.header).to include("Pragma")
     end
@@ -363,7 +384,7 @@ describe FilesController do
       user_session(@teacher)
       @enrollment.conclude
       get 'show', params: {:course_id => @course.id, :id => @file.id}
-      expect(response).to be_success
+      expect(response).to be_successful
       get 'show', params: {:course_id => @course.id, :id => @file.id, :download => 1}
       expect(response).to be_redirect
     end
@@ -388,7 +409,7 @@ describe FilesController do
       it "should allow concluded students to read and download files" do
         @enrollment.conclude
         get 'show', params: {:course_id => @course.id, :id => @file.id}
-        expect(response).to be_success
+        expect(response).to be_successful
         get 'show', params: {:course_id => @course.id, :id => @file.id, :download => 1}
         expect(response).to be_redirect
       end
@@ -442,7 +463,7 @@ describe FilesController do
         new_file.save
 
         get 'show', params: {:course_id => @course.id, :id => new_file.id}
-        expect(response).to be_success
+        expect(response).to be_successful
         expect(assigns(:attachment)).to eq new_file
       end
 
@@ -476,7 +497,7 @@ describe FilesController do
         # create an orphaned attachment_association
         @assignment.all_submissions.delete_all
         get 'show', params: {user_id: @student.id, id: @attachment.id, download_frd: 1}
-        expect(response).to be_success
+        expect(response).to be_successful
       end
     end
 
@@ -498,7 +519,7 @@ describe FilesController do
         attachment_model :context => @student
         @assignment.submit_homework @student, :attachments => [@attachment]
         get 'show', params: {:user_id => @student.id, :id => @attachment.id, :inline => 1}
-        expect(response).to be_success
+        expect(response).to be_successful
       end
     end
 
@@ -523,8 +544,13 @@ describe FilesController do
 
       it "is included in newly uploaded files" do
         user_session(@teacher)
-        post 'create', params: {:course_id => @course.id, :attachment => {:display_name => "bob", :uploaded_data => io}}, :format => 'json'
-        expect(json_parse['attachment']['canvadoc_session_url']).to be_present
+
+        attachment = factory_with_protected_attributes(Attachment, context: @course, file_state: 'deleted', filename: 'test.txt')
+        attachment.uploaded_data = io
+        attachment.save!
+
+        get 'api_create_success', params: {id: attachment.id, uuid: attachment.uuid}, :format => 'json'
+        expect(json_parse['canvadoc_session_url']).to be_present
       end
     end
   end
@@ -583,14 +609,10 @@ describe FilesController do
         allow(HostUrl).to receive(:file_host).and_return('files.test')
         request.host = 'files.test'
         @file.update_attribute(:content_type, 'text/html')
-        s3object = double()
-        allow(s3object).to receive(:content_length).and_return(5)
-        allow(s3object).to receive(:get).and_return(s3object)
-        allow(s3object).to receive(:body).and_return(s3object)
-        allow(s3object).to receive(:read).and_return('hello')
-        allow_any_instantiation_of(@file).to receive(:s3object).and_return(s3object)
+        handle = double(read: 'hello')
+        allow_any_instantiation_of(@file).to receive(:open).and_return(handle)
         get "show_relative", params: {file_id: @file.id, course_id: @course.id, file_path: @file.full_display_path, inline: 1, download: 1}
-        expect(response).to be_success
+        expect(response).to be_successful
         expect(response.body).to eq 'hello'
         expect(response.content_type).to eq 'text/html'
       end
@@ -601,7 +623,7 @@ describe FilesController do
         request.host = 'files.test'
         @file.update_attribute(:content_type, 'text/html')
         @file.update_attribute(:size, 1024 * 1024)
-        allow_any_instantiation_of(@file).to receive(:inline_url).and_return("https://s3/myfile")
+        allow_any_instance_of(FileAuthenticator).to receive(:inline_url).and_return("https://s3/myfile")
         get "show_relative", params: {file_id: @file.id, course_id: @course.id, file_path: @file.full_display_path, inline: 1, download: 1}
         expect(response).to redirect_to("https://s3/myfile")
       end
@@ -611,7 +633,7 @@ describe FilesController do
         allow(HostUrl).to receive(:file_host).and_return('files.test')
         request.host = 'files.test'
         @file.update_attribute(:content_type, 'image/jpeg')
-        allow_any_instantiation_of(@file).to receive(:inline_url).and_return("https://s3/myfile")
+        allow_any_instance_of(FileAuthenticator).to receive(:inline_url).and_return("https://s3/myfile")
         get "show_relative", params: {file_id: @file.id, course_id: @course.id, file_path: @file.full_display_path, inline: 1, download: 1}
         expect(response).to redirect_to("https://s3/myfile")
       end
@@ -621,7 +643,7 @@ describe FilesController do
         allow(HostUrl).to receive(:file_host).and_return('files.test')
         request.host = 'files.test'
         # it's a .doc file
-        allow_any_instantiation_of(@file).to receive(:download_url).and_return("https://s3/myfile")
+        allow_any_instance_of(FileAuthenticator).to receive(:download_url).and_return("https://s3/myfile")
         get "show_relative", params: {file_id: @file.id, course_id: @course.id, file_path: @file.full_display_path, inline: 1, download: 1}
         expect(response).to redirect_to("https://s3/myfile")
       end
@@ -652,87 +674,34 @@ describe FilesController do
         assert_unauthorized
       end
     end
-  end
 
-  describe "POST 'create'" do
-    it "should require authorization" do
-      post 'create', params: {:course_id => @course.id, :attachment => {:display_name => "bob"}}
-      assert_unauthorized
-    end
-
-    it "should create file" do
-      user_session(@teacher)
-      post 'create', params: {:course_id => @course.id, :attachment => {:display_name => "bob", :uploaded_data => io}}
-      expect(response).to be_redirect
-      expect(assigns[:attachment]).not_to be_nil
-      expect(assigns[:attachment].display_name).to eql("bob")
-    end
-
-    it "should create unpublished files if usage rights required" do
-      @course.account.allow_feature! :usage_rights_required
-      @course.enable_feature! :usage_rights_required
-      user_session(@teacher)
-      post 'create', params: {:course_id => @course.id, :attachment => {:display_name => "wat", :uploaded_data => io}}
-      expect(assigns[:attachment]).to be_locked
-    end
-
-    it "should reject an upload that would exceed quota" do
-      user_session(@teacher)
-      Setting.set('user_default_quota', 7) # seven... seven bytes.
-      post 'create', params: {:user_id => @teacher.id, :attachment => {:display_name => "bob", :uploaded_data => io}}, :format => :json
-      expect(response.status).to eq 400
-      expect(response.body).to include 'quota exceeded'
-    end
-
-    it "does not check quota for local-storage submission uploads" do
-      local_storage!
-      user_session(@student)
-      Setting.set('user_default_quota', 7)
-      file = @student.attachments.build
-      file.file_state = 'deleted'
-      file.workflow_state = 'unattached'
-      file.save!
-      post 'create', params: {:user_id => @student.id,
-           :check_quota_after => '0',
-           :filename => 'submission.doc',
-           :attachment => {
-             :unattached_attachment_id => file.id,
-             :uploaded_data => io
-           }},
-           :format => 'json'
-      expect(response).to be_success
-      expect(file.reload).to be_available
-    end
-
-    it "refuses to create a file in a submissions folder" do
-      user_session(@student)
-      post 'create', params: {:user_id => @student.id, :attachment => {:display_name => 'blah', :uploaded_data => io, :folder_id => @student.submissions_folder.id}}, :format => :json
-      expect(response.status).to eq 401
-    end
-
-    context "sharding" do
-      specs_require_sharding
-
-      it "should create when an unattached file is on another shard" do
-        root_attachment = factory_with_protected_attributes(Attachment, :context => @course, :file_state => 'deleted', :workflow_state => 'unattached', :filename => 'test.txt', :content_type => 'text')
-        root_attachment.uploaded_data = io
-        root_attachment.save!
-
-        @shard1.activate do
-          @student = user_factory(active_user: true)
-          @attachment = factory_with_protected_attributes(Attachment, :context => @student, :file_state => 'deleted', :workflow_state => 'unattached', :filename => 'test.txt', :content_type => 'text')
-        end
-
-        @course.enroll_user(@student, "StudentEnrollment").accept!
-        @assignment = @course.assignments.create!(:title => 'upload_assignment', :submission_types => 'online_upload')
-
-        user_session(@student)
-        post 'create', params: {:attachment => {:display_name => "bob", :uploaded_data => io, :unattached_attachment_id => @attachment.id}}
-        expect(response).to be_redirect
-        expect(assigns[:attachment]).not_to be_nil
-        expect(assigns[:attachment].display_name).to eql("bob")
-        expect(assigns[:attachment].shard).to eql @shard1
+    context "account-context files" do
+      before :once do
+        @account = account_model
       end
+
+      before :each do
+        allow(HostUrl).to receive(:file_host).and_return('files.test')
+        request.host = 'files.test'
+        user_session(@teacher)
+      end
+
+      it "should skip verification for an account-context file" do
+        account_js_file
+        file_verifier = Attachments::Verification.new(@file).verifier_for_user(nil)
+        user_verifier = Users::AccessVerifier.generate(user: @teacher)
+        get 'show_relative', params: user_verifier.merge(:download => 1, :inline => 1, :verifier => file_verifier, :account_id => @account.id, :file_id => @file.id, :file_path => @file.full_path)
+        expect(response).to be_successful
+      end
+
+      it "should enforce verification for contexts other than account" do
+        course_file
+        file_verifier = Attachments::Verification.new(@file).verifier_for_user(nil)
+        user_verifier = Users::AccessVerifier.generate(user: @teacher)
+        get 'show_relative', params: user_verifier.merge(:download => 1, :inline => 1, :verifier => file_verifier, :account_id => @account.id, :file_id => @file.id, :file_path => @file.full_path)
+        assert_unauthorized
+      end
+
     end
   end
 
@@ -760,7 +729,7 @@ describe FilesController do
       course_folder
 
       put 'update', params: {:course_id => @course.id, :id => @file.id, :attachment => { :folder_id => @folder.id }}, :format => 'json'
-      expect(response).to be_success
+      expect(response).to be_successful
 
       @file.reload
       expect(@file.folder).to eql(@folder)
@@ -887,13 +856,12 @@ describe FilesController do
         :context_code => @course.asset_string,
         :filename => "bob.txt"
       }}
-      expect(response).to be_success
+      expect(response).to be_successful
       expect(assigns[:attachment]).not_to be_nil
       expect(assigns[:attachment].id).not_to be_nil
       expect(assigns[:attachment][:user_id]).not_to be_nil
       json = json_parse
       expect(json).not_to be_nil
-      expect(json['id']).to eql(assigns[:attachment].id)
       expect(json['upload_url']).not_to be_nil
       expect(json['upload_params']).not_to be_nil
       expect(json['upload_params']).not_to be_empty
@@ -906,13 +874,12 @@ describe FilesController do
         :context_code => @course.asset_string,
         :filename => "bob.txt"
       }}
-      expect(response).to be_success
+      expect(response).to be_successful
       expect(assigns[:attachment]).not_to be_nil
       expect(assigns[:attachment].id).not_to be_nil
       expect(assigns[:attachment][:user_id]).not_to be_nil
       json = json_parse
       expect(json).not_to be_nil
-      expect(json['id']).to eql(assigns[:attachment].id)
       expect(json['upload_url']).not_to be_nil
       expect(json['upload_params']).to be_present
       expect(json['upload_params']['x-amz-credential']).to start_with('stub_id')
@@ -927,7 +894,7 @@ describe FilesController do
         :filename => "something.rb",
         :content_type => "text/magical-incantation"
       }}
-      expect(response).to be_success
+      expect(response).to be_successful
       expect(assigns[:attachment].content_type).to eq "text/magical-incantation"
     end
 
@@ -937,9 +904,10 @@ describe FilesController do
       Setting.set('user_default_quota', -1)
       post 'create_pending', params: {:attachment => {
         :context_code => @student.asset_string,
-        :filename => "bob.txt"
+        :filename => "bob.txt",
+        :size => 1
       }}
-      expect(response).to be_redirect
+      expect(response).to be_bad_request
       expect(assigns[:quota_used]).to be > assigns[:quota]
     end
 
@@ -954,12 +922,11 @@ describe FilesController do
         :intent => 'submit',
         :filename => "bob.txt"
       }, :format => :json}
-      expect(response).to be_success
+      expect(response).to be_successful
       expect(assigns[:attachment]).not_to be_nil
       expect(assigns[:attachment].id).not_to be_nil
       json = json_parse
       expect(json).not_to be_nil
-      expect(json['id']).to eql(assigns[:attachment].id)
       expect(json['upload_url']).not_to be_nil
       expect(json['upload_params']).to be_present
       expect(json['upload_params']['x-amz-credential']).to start_with('stub_id')
@@ -983,7 +950,7 @@ describe FilesController do
         :intent => 'submit',
         :filename => "bob.txt"
       }}
-      expect(response).to be_success
+      expect(response).to be_successful
 
       expect(assigns[:attachment]).not_to be_nil
       expect(assigns[:attachment].context).to eq group
@@ -996,7 +963,7 @@ describe FilesController do
           :context_code => @course.asset_string,
           :filename => "bob.txt"
       }}
-      expect(response).to be_success
+      expect(response).to be_successful
       expect(assigns[:attachment].locked).to be_falsy
     end
 
@@ -1007,7 +974,7 @@ describe FilesController do
           :context_code => @course.asset_string,
           :filename => "bob.txt"
       }}
-      expect(response).to be_success
+      expect(response).to be_successful
       expect(assigns[:attachment].locked).to be_truthy
     end
 
@@ -1047,7 +1014,7 @@ describe FilesController do
         :intent => 'submit',
         :filename => "bob.txt"
       }}
-      expect(response).to be_success
+      expect(response).to be_successful
       expect(assigns[:attachment]).not_to be_nil
       expect(assigns[:attachment].context).to eq group
       expect(assigns[:attachment].folder).to be_for_submissions
@@ -1067,7 +1034,7 @@ describe FilesController do
         :intent => 'submit',
         :filename => "bob.txt"
       }}
-      expect(response).to be_success
+      expect(response).to be_successful
       expect(assigns[:attachment]).not_to be_nil
       expect(assigns[:attachment]).not_to be_locked
     end
@@ -1085,13 +1052,12 @@ describe FilesController do
                                  :context_code => @course.asset_string,
                                  :filename => "bob.txt"
                              }}
-        expect(response).to be_success
+        expect(response).to be_successful
         expect(assigns[:attachment]).not_to be_nil
         expect(assigns[:attachment].id).not_to be_nil
         expect(assigns[:attachment].shard).to eq @shard1
         json = json_parse
         expect(json).not_to be_nil
-        expect(json['id']).to eql(assigns[:attachment].id)
         expect(json['upload_url']).not_to be_nil
         expect(json['upload_params']).not_to be_nil
         expect(json['upload_params']).not_to be_empty
@@ -1114,13 +1080,12 @@ describe FilesController do
                                  :intent => 'submit',
                                  :filename => "bob.txt"
                              }}
-        expect(response).to be_success
+        expect(response).to be_successful
         expect(assigns[:attachment]).not_to be_nil
         expect(assigns[:attachment].id).not_to be_nil
         expect(assigns[:attachment].shard).to eq @shard1
         json = json_parse
         expect(json).not_to be_nil
-        expect(json['id']).to eql(assigns[:attachment].id)
         expect(json['upload_url']).not_to be_nil
         expect(json['upload_params']).not_to be_nil
         expect(json['upload_params']).not_to be_empty
@@ -1189,6 +1154,33 @@ describe FilesController do
       post "api_create", params: params[:upload_params].merge(:file => @content)
       assert_status(400)
     end
+
+    it "should forward params[:success_include] to the api_create_success redirect as params[:include] if present" do
+      local_storage!
+      params = @attachment.ajax_upload_params(@teacher.pseudonym, "", "")
+      post "api_create", params: params[:upload_params].merge(:file => @content, :success_include => 'foo')
+      expect(response).to be_redirect
+      expect(response.location).to include('include%5B%5D=foo') # include[]=foo, url encoded
+    end
+
+    it "should add 'include=avatar' to the api_create_success redirect for profile pictures" do
+      profile_pic = factory_with_protected_attributes(
+        Attachment,
+        user: @teacher,
+        context: @teacher,
+        folder: @teacher.profile_pics_folder,
+        file_state: 'deleted',
+        workflow_state: 'unattached',
+        filename: 'profile.png',
+        content_type: 'image/png',
+      )
+
+      local_storage!
+      params = profile_pic.ajax_upload_params(@teacher.pseudonym, "", "")
+      post "api_create", params: params[:upload_params].merge(:file => @content)
+      expect(response).to be_redirect
+      expect(response.location).to include('include%5B%5D=avatar') # include[]=avatar, url encoded
+    end
   end
 
   describe "POST api_capture" do
@@ -1216,25 +1208,228 @@ describe FilesController do
       assert_status(400)
     end
 
-    it "should create a new attachment" do
-      course = Course.create
-      folder = Folder.create!(:name => "test", :context => course)
-      user = User.create!(:name => "me")
-      params = {
-        id: 1,
-        user_id: user.id,
-        context_type: "Course",
-        context_id: course.id,
-        token: @token,
-        name: "test.txt",
-        size: 42,
-        content_type: "text/plain",
-        instfs_uuid: 1,
-        folder_id: folder.id,
-      }
-      post "api_capture", params: params
-      assert_status(201)
-      expect(folder.attachments.first).to_not be_nil
+    context 'with a course' do
+      let(:course) { Course.create }
+      let(:user) { User.create!(name: "me") }
+      let(:folder) { Folder.create!(name: "test", context: course) }
+      let(:params) do
+         {
+          id: 1,
+          user_id: user.id,
+          context_type: "Course",
+          context_id: course.id,
+          token: @token,
+          name: "test.txt",
+          size: 42,
+          content_type: "text/plain",
+          instfs_uuid: 1,
+          folder_id: folder.id,
+        }
+      end
+
+      it "should create a new attachment" do
+        post "api_capture", params: params
+        assert_status(201)
+        expect(folder.attachments.first).not_to be_nil
+      end
+
+      it "should include the attachment json in the response" do
+        post "api_capture", params: params
+        assert_status(201)
+        attachment = folder.attachments.first
+        data = json_parse
+        expect(data["id"]).to eql attachment.id
+        expect(data["filename"]).to eql "test.txt"
+        expect(data["url"]).not_to be_nil
+      end
+
+      it "works with a ContentMigration as the context" do
+        migration = course.content_migrations.create!
+        request_params = params.merge(
+          context_id: migration.id,
+          context_type: "ContentMigration"
+        )
+
+        post "api_capture", params: request_params
+        assert_status(201)
+      end
+
+      it "works with a Quizzes::QuizSubmission as the context" do
+        quiz = course.quizzes.create!
+        submission = quiz.quiz_submissions.create!(user: user)
+
+        request_params = params.merge(
+          context_type: "Quizzes::QuizSubmission",
+          context_id: submission.id
+        )
+
+        post "api_capture", params: request_params
+        assert_status(201)
+      end
+
+      context 'with an Assignment' do
+        let(:assignment) { course.assignments.create! }
+        let(:assignment_params) do
+          params.merge(
+            context_type: "Assignment",
+            context_id: assignment.id
+          )
+        end
+        let(:attachment) do
+          Attachment.create!(
+            context: assignment,
+            user: @student,
+            filename: 'cats.jpg',
+            uploaded_data: StringIO.new('meow?')
+          )
+        end
+        let!(:homework_service) { Services::SubmitHomeworkService.new(attachment, assignment) }
+
+        before do
+          allow(Mailer).to receive(:deliver)
+          allow(Services::SubmitHomeworkService).to(receive(:new)).and_return(homework_service)
+        end
+
+        it "works with an Assignment as the context" do
+          post "api_capture", params: assignment_params
+          assert_status(201)
+        end
+
+        context 'with a Progress' do
+          let(:progress) do
+            ::Progress.
+              new(context: assignment, user: user, tag: :test).
+              tap(&:start).
+              tap(&:save!)
+          end
+          let(:progress_params) do
+            assignment_params.merge(
+              progress_id: progress.id
+            )
+          end
+          let(:request) do
+            post "api_capture", params: progress_params
+            progress.reload
+          end
+
+          it "completes the Progress object" do
+            request
+            expect(progress).to be_completed
+          end
+
+          it "sets the attachment id in the Progress#results" do
+            request
+            expect(progress.results["id"]).not_to be_nil
+          end
+
+          it "returns a 201 http status" do
+            request
+            assert_status(201)
+          end
+
+          it 'should not submit the attachment' do
+            expect(homework_service).not_to receive(:submit)
+            request
+          end
+        end
+
+        context 'with Progress tagged as :upload_via_url' do
+          let(:progress) do
+            ::Progress.
+              new(context: assignment, user: user, tag: :upload_via_url).
+              tap(&:start).
+              tap(&:save!)
+          end
+          let(:progress_params) do
+            assignment_params.merge(
+              progress_id: progress.id,
+              submit_assignment: true,
+              eula_agreement_timestamp: eula_agreement_timestamp
+            )
+          end
+          let(:eula_agreement_timestamp) { '1522419910' }
+          let(:request) { post "api_capture", params: progress_params }
+
+          before do
+            allow(homework_service).to receive(:queue_email)
+          end
+
+          it 'should submit the attachment' do
+            expect(homework_service).to receive(:submit).with(
+              progress.created_at,
+              eula_agreement_timestamp
+            )
+            request
+          end
+
+          it 'should save the eula_agreement_timestamp' do
+            request
+            submission = Submission.where(assignment_id: assignment.id)
+            expect(submission.first.turnitin_data[:eula_agreement_timestamp]).to eq(eula_agreement_timestamp)
+          end
+
+          it "returns a 201 http status" do
+            request
+            assert_status(201)
+          end
+
+          it 'should send a failure email' do
+            allow(homework_service).to receive(:submit).and_raise('error')
+            expect(homework_service).to receive(:failure_email)
+            request
+
+            expect(progress.reload.workflow_state).to eq 'failed'
+          end
+        end
+
+        context 'with Progress but submit_assignment not set' do
+          let(:progress) do
+            ::Progress.
+              new(context: assignment, user: user, tag: :upload_via_url).
+              tap(&:start).
+              tap(&:save!)
+          end
+          let(:progress_params) do
+            assignment_params.merge(
+              progress_id: progress.id
+            )
+          end
+          let(:request) { post "api_capture", params: progress_params }
+
+          it 'should not submit the attachment' do
+            expect(homework_service).not_to receive(:submit)
+            request
+          end
+
+          it "returns a 201 http status" do
+            request
+            assert_status(201)
+          end
+        end
+      end
+    end
+
+    context "sharding" do
+      specs_require_sharding
+
+      it "should create the attachment on the context's shard" do
+        user = @shard1.activate{ User.create!(name: "me") }
+        post "api_capture", params: {
+          user_id: user.global_id,
+          context_type: "User",
+          context_id: user.global_id,
+          token: @token,
+          name: "test.txt",
+          size: 42,
+          content_type: "text/plain",
+          instfs_uuid: 1,
+          folder_id: user.profile_pics_folder.global_id,
+        }
+        assert_status(201)
+        attachment = assigns[:attachment]
+        expect(attachment).not_to be_nil
+        expect(attachment.shard).to eq @shard1
+      end
     end
   end
 
@@ -1252,9 +1447,9 @@ describe FilesController do
 
       it "should give a download url" do
         get "public_url", params: {:id => @attachment.id}
-        expect(response).to be_success
+        expect(response).to be_successful
         data = json_parse
-        expect(data).to eq({ "public_url" => @attachment.authenticated_url(secure: false) })
+        expect(data).to eq({ "public_url" => @attachment.public_url(secure: false) })
       end
     end
 
@@ -1270,9 +1465,9 @@ describe FilesController do
 
       it "should allow a teacher to download a student's submission" do
         get "public_url", params: {:id => @attachment.id, :submission_id => @submission.id}
-        expect(response).to be_success
+        expect(response).to be_successful
         data = json_parse
-        expect(data).to eq({ "public_url" => @attachment.authenticated_url(secure: false) })
+        expect(data).to eq({ "public_url" => @attachment.public_url(secure: false) })
       end
 
       it "should verify that the requested file belongs to the submission" do
@@ -1286,9 +1481,9 @@ describe FilesController do
         new_file = attachment_model(:context => @student)
         @assignment.submit_homework @student, :attachments => [new_file]
         get "public_url", params: {:id => old_file.id, :submission_id => @submission.id}
-        expect(response).to be_success
+        expect(response).to be_successful
         data = json_parse
-        expect(data).to eq({ "public_url" => old_file.authenticated_url(secure: false) })
+        expect(data).to eq({ "public_url" => old_file.public_url(secure: false) })
       end
     end
   end

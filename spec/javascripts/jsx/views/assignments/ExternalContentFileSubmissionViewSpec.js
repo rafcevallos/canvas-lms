@@ -20,12 +20,14 @@ import Backbone from 'Backbone'
 import ExternalContentFileSubmissionView from 'compiled/views/assignments/ExternalContentFileSubmissionView'
 import $ from 'jquery'
 import fakeENV from 'helpers/fakeENV'
+import axios from 'axios'
 
 const contentItem = {
   '@type': 'FileItem',
   url: 'http://lti.example.com/content/launch/42',
   name: 'FileDude',
-  comment: 'Foo all the bars!'
+  comment: 'Foo all the bars!',
+  eula_agreement_timestamp: 1522419910
 }
 
 let sandbox
@@ -55,7 +57,7 @@ QUnit.module('ExternalContentFileSubmissionView#uploadFileFromUrl', {
 })
 
 test("hits the course url", () => {
-  const spy = sandbox.spy($, 'ajaxJSON')
+  const spy = sandbox.spy(axios, 'post')
   view.uploadFileFromUrl({}, model)
   ok(spy.calledWith('/api/v1/courses/42/assignments/24/submissions/5/files'))
 })
@@ -63,7 +65,14 @@ test("hits the course url", () => {
 test("hits the group url", () => {
   window.ENV.SUBMIT_ASSIGNMENT.GROUP_ID_FOR_USER = 2
 
-  const spy = sandbox.spy($, 'ajaxJSON')
+  const spy = sandbox.spy(axios, 'post')
   view.uploadFileFromUrl({}, model)
   ok(spy.calledWith('/api/v1/groups/2/files'))
+})
+
+test("sends the eula agreement timestamp to the submission endpoint", () => {
+  const spy = sandbox.spy(axios, 'post')
+  view.uploadFileFromUrl({}, model)
+  equal(spy.args[0][1].eula_agreement_timestamp, model.get('eula_agreement_timestamp'))
+  ok(spy.calledWith('/api/v1/courses/42/assignments/24/submissions/5/files'))
 })

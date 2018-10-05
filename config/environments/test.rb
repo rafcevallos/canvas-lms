@@ -47,10 +47,14 @@ environment_configuration(defined?(config) && config) do |config|
   # Raise exceptions instead of rendering exception templates
   config.action_dispatch.show_exceptions = true
 
-  # Print deprecation notices to the stderr
-  config.active_support.deprecation = :stderr
+  # Print deprecation notices to both stderr and the log
+  config.active_support.deprecation = [:stderr, :log]
 
   config.eager_load = false
+
+  config.after_initialize do
+    require_relative 'bullet'
+  end
 
   # eval <env>-local.rb if it exists
   Dir[File.dirname(__FILE__) + "/" + File.basename(__FILE__, ".rb") + "-*.rb"].each { |localfile| eval(File.new(localfile).read, nil, localfile, 1) }

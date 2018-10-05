@@ -79,8 +79,8 @@ module DiscussionHelpers
   end
 
   class << self
-    def create_discussion_topic(course, user, title, message, assignment = nil)
-      course.discussion_topics.create!(
+    def create_discussion_topic(context, user, title, message, assignment = nil)
+      context.discussion_topics.create!(
         user: user,
         title: title,
         message: message,
@@ -96,6 +96,12 @@ module DiscussionHelpers
 
     def disable_moderate_discussions(course, context_role)
       course.root_account.role_overrides.create!(permission: 'moderate_forum',
+                                                  role: context_role,
+                                                  enabled: false)
+    end
+
+    def disable_create_discussions(course, context_role)
+      course.root_account.role_overrides.create!(permission: 'create_forum',
                                                   role: context_role,
                                                   enabled: false)
     end

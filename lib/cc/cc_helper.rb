@@ -200,7 +200,7 @@ module CCHelper
           if match_data = match.url.match(%r{/files/folder/(.*)})
             # this might not be the best idea but let's keep going and see what happens
             "#{COURSE_TOKEN}/files/folder/#{match_data[1]}"
-          else
+          elsif match.prefix.present?
             # If match.obj_id is nil, it's because we're actually linking to a page
             # (the /courses/:id/files page) and not to a specific file. In this case,
             # just pass it straight through.
@@ -233,9 +233,9 @@ module CCHelper
                  @course.wiki_pages.where(id: url_or_title.to_i).first
         end
         if page
-          "#{WIKI_TOKEN}/#{match.type}/#{page.url}"
+          "#{WIKI_TOKEN}/#{match.type}/#{page.url}#{match.query}"
         else
-          "#{WIKI_TOKEN}/#{match.type}/#{match.obj_id}"
+          "#{WIKI_TOKEN}/#{match.type}/#{match.obj_id}#{match.query}"
         end
       end
       @rewriter.set_handler('wiki', &wiki_handler)
@@ -243,7 +243,7 @@ module CCHelper
       @rewriter.set_handler('items') do |match|
         item = ContentTag.find(match.obj_id)
         migration_id = @key_generator.create_key(item)
-        new_url = "#{COURSE_TOKEN}/modules/#{match.type}/#{migration_id}"
+        new_url = "#{COURSE_TOKEN}/modules/#{match.type}/#{migration_id}#{match.query}"
       end
       @rewriter.set_default_handler do |match|
         new_url = match.url
@@ -253,7 +253,8 @@ module CCHelper
             # for all other types,
             # create a migration id for the object, and use that as the new link
             migration_id = @key_generator.create_key(obj)
-            new_url = "#{OBJECT_TOKEN}/#{match.type}/#{migration_id}"
+            query = translate_module_item_query(match.query)
+            new_url = "#{OBJECT_TOKEN}/#{match.type}/#{migration_id}#{query}"
           end
         elsif match.obj_id
           new_url = "#{COURSE_TOKEN}/#{match.type}/#{match.obj_id}#{match.rest}"
@@ -268,6 +269,14 @@ module CCHelper
       port = ConfigFile.load("domain").try(:[], :domain).try(:split, ':').try(:[], 1)
       @url_prefix = "#{protocol}://#{host}"
       @url_prefix += ":#{port}" if !host.include?(':') && port.present?
+    end
+
+    def translate_module_item_query(query)
+      return query unless query&.include?("module_item_id=")
+      original_param = query.sub("?", "").split("&").detect{|p| p.include?("module_item_id=")}
+      tag_id = original_param.split("=").last
+      new_param = "module_item_id=#{@key_generator.create_key("content_tag_#{tag_id}")}"
+      query.sub(original_param, new_param)
     end
 
     attr_reader :course, :user

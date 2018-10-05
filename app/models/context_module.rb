@@ -20,6 +20,7 @@ class ContextModule < ActiveRecord::Base
   include Workflow
   include SearchTermHelper
   include DuplicatingObjects
+  include LockedFor
 
   include MasterCourses::Restrictor
   restrict_columns :state, [:workflow_state]
@@ -48,21 +49,21 @@ class ContextModule < ActiveRecord::Base
     return if self.new_record?
 
     if self.context.available? && self.active?
-      if self.workflow_state_changed? && self.workflow_state_was == "unpublished"
+      if self.saved_change_to_workflow_state? && self.workflow_state_before_last_save == "unpublished"
         # should trigger when publishing a prerequisite for an already active module
         @relock_warning = true if self.context.context_modules.active.any?{|mod| self.is_prerequisite_for?(mod)}
       end
-      if self.completion_requirements_changed?
+      if self.saved_change_to_completion_requirements?
         # removing a requirement shouldn't trigger
-        @relock_warning = true if (self.completion_requirements.to_a - self.completion_requirements_was.to_a).present?
+        @relock_warning = true if (self.completion_requirements.to_a - self.completion_requirements_before_last_save.to_a).present?
       end
-      if self.prerequisites_changed?
+      if self.saved_change_to_prerequisites?
         # ditto with removing a prerequisite
-        @relock_warning = true if (self.prerequisites.to_a - self.prerequisites_was.to_a).present?
+        @relock_warning = true if (self.prerequisites.to_a - self.prerequisites_before_last_save.to_a).present?
       end
-      if self.unlock_at_changed?
+      if self.saved_change_to_unlock_at?
         # adding a unlock_at date should trigger
-        @relock_warning = true if self.unlock_at.present? && self.unlock_at_was.blank?
+        @relock_warning = true if self.unlock_at.present? && self.unlock_at_before_last_save.blank?
       end
     end
   end
@@ -170,10 +171,8 @@ class ContextModule < ActiveRecord::Base
       :context_type => self.context_type,
       :name => copy_title,
       :position => ContextModule.not_deleted.where(context_id: self.context_id).maximum(:position) + 1,
-      :prerequisites => self.prerequisites,
       :completion_requirements => self.completion_requirements,
       :workflow_state => 'unpublished',
-      :unlock_at => self.unlock_at,
       :require_sequential_progress => self.require_sequential_progress,
       :completion_events => self.completion_events,
       :requirement_count => self.requirement_count
@@ -194,6 +193,8 @@ class ContextModule < ActiveRecord::Base
       :content_type => original_content_tag.content_type,
       :context_id => original_content_tag.context_id,
       :context_type => original_content_tag.context_type,
+      :url => original_content_tag.url,
+      :new_tab => original_content_tag.new_tab,
       :title => original_content_tag.title,
       :tag_type => original_content_tag.tag_type,
       :position => original_content_tag.position,
@@ -320,11 +321,11 @@ class ContextModule < ActiveRecord::Base
     can :read
   end
 
-  def locked_for?(user, opts={})
+  def low_level_locked_for?(user, opts={})
     return false if self.grants_right?(user, :read_as_admin)
     available = self.available_for?(user, opts)
-    return {:asset_string => self.asset_string, :context_module => self.attributes} unless available
-    return {:asset_string => self.asset_string, :context_module => self.attributes, :unlock_at => self.unlock_at} if self.to_be_unlocked
+    return {object: self, module: self} unless available
+    return {object: self, module: self, unlock_at: unlock_at} if to_be_unlocked
     false
   end
 

@@ -29,8 +29,10 @@ define [
   'jsx/grading/helpers/GradingPeriodsHelper'
   'timezone'
   'jsx/shared/helpers/numberHelper'
-], ($, _, {Model}, DefaultUrlMixin, TurnitinSettings, VeriCiteSettings, DateGroup, AssignmentOverrideCollection,
-    DateGroupCollection, I18n, GradingPeriodsHelper, tz, numberHelper) ->
+  '../util/PandaPubPoller'
+], ($, _, {Model}, DefaultUrlMixin, TurnitinSettings, VeriCiteSettings, DateGroup,
+    AssignmentOverrideCollection, DateGroupCollection, I18n, GradingPeriodsHelper,
+    tz, numberHelper, PandaPubPoller) ->
 
   isAdmin = () ->
     _.contains(ENV.current_user_roles, 'admin')
@@ -196,13 +198,25 @@ define [
       return @get 'post_to_sis' unless arguments.length > 0
       @set 'post_to_sis', postToSisBoolean
 
-    moderatedGrading: (moderatedGradingBoolean) =>
-      return @get 'moderated_grading' unless arguments.length > 0
-      @set 'moderated_grading', moderatedGradingBoolean
+    moderatedGrading: (enabled) =>
+      return @get('moderated_grading') or false unless arguments.length > 0
+      @set('moderated_grading', enabled)
 
     anonymousInstructorAnnotations: (anonymousInstructorAnnotationsBoolean) =>
       return @get 'anonymous_instructor_annotations' unless arguments.length > 0
       @set 'anonymous_instructor_annotations', anonymousInstructorAnnotationsBoolean
+
+    anonymousGrading: (anonymousGradingBoolean) =>
+      return @get 'anonymous_grading' unless arguments.length > 0
+      @set 'anonymous_grading', anonymousGradingBoolean
+
+    gradersAnonymousToGraders: (anonymousGraders) =>
+      return @get('graders_anonymous_to_graders') unless arguments.length > 0
+      @set 'graders_anonymous_to_graders', anonymousGraders
+
+    graderCommentsVisibleToGraders: (commentsVisible) =>
+      return !!@get('grader_comments_visible_to_graders') unless arguments.length > 0
+      @set 'grader_comments_visible_to_graders', commentsVisible
 
     peerReviews: (peerReviewBoolean) =>
       return @get 'peer_reviews' unless arguments.length > 0
@@ -391,11 +405,32 @@ define [
       else
         return @dueAt()
 
+    canDuplicate: =>
+      @get('can_duplicate')
+
+    isDuplicating: =>
+      @get('workflow_state') == 'duplicating'
+
+    failedToDuplicate: =>
+      @get('workflow_state') == 'failed_to_duplicate'
+
+    originalAssignmentID: =>
+      @get('original_assignment_id')
+
+    originalAssignmentName: =>
+      @get('original_assignment_name')
+
     is_quiz_assignment: =>
       @get('is_quiz_assignment')
 
     isQuizLTIAssignment: =>
       @get('is_quiz_lti_assignment')
+
+    isImporting: =>
+      @get('workflow_state') == 'importing'
+
+    failedToImport: =>
+      @get('workflow_state') == 'failed_to_import'
 
     submissionTypesFrozen: =>
       _.include(@frozenAttributes(), 'submission_types')
@@ -417,9 +452,12 @@ define [
         'labelId', 'position', 'postToSIS', 'multipleDueDates', 'nonBaseDates',
         'allDates', 'hasDueDate', 'hasPointsPossible', 'singleSectionDueDate',
         'moderatedGrading', 'postToSISEnabled', 'isOnlyVisibleToOverrides',
-        'omitFromFinalGrade', 'is_quiz_assignment', 'isQuizLTIAssignment',
-        'secureParams', 'inClosedGradingPeriod', 'dueDateRequired', 'submissionTypesFrozen',
-        'anonymousInstructorAnnotations'
+        'omitFromFinalGrade', 'isDuplicating', 'failedToDuplicate',
+        'originalAssignmentName', 'is_quiz_assignment', 'isQuizLTIAssignment',
+        'isImporting', 'failedToImport',
+        'secureParams', 'inClosedGradingPeriod', 'dueDateRequired',
+        'submissionTypesFrozen', 'anonymousInstructorAnnotations',
+        'anonymousGrading', 'gradersAnonymousToGraders', 'showGradersAnonymousToGradersCheckbox'
       ]
 
       hash =
@@ -529,9 +567,32 @@ define [
       $.ajaxJSON "/api/v1/courses/#{course_id}/assignments/#{assignment_id}/duplicate", 'POST',
         {}, callback
 
+    pollUntilFinishedDuplicating: (interval = 3000) =>
+      @pollUntilFinished(interval, @isDuplicating)
+
+    pollUntilFinishedImporting: (interval = 3000) =>
+      @pollUntilFinished(interval, @isImporting)
+
+    pollUntilFinishedLoading: (interval = 3000) =>
+      if @isDuplicating()
+        @pollUntilFinishedDuplicating(interval)
+      else if @isImporting()
+        @pollUntilFinishedImporting(interval)
+
+    pollUntilFinished: (interval, isFinished) =>
+      # TODO: implement pandapub streaming updates
+      poller = new PandaPubPoller interval, interval * 5, (done) =>
+        @fetch().always =>
+          done()
+          poller.stop() unless isFinished()
+      poller.start()
+
     isOnlyVisibleToOverrides: (override_flag) ->
       return @get('only_visible_to_overrides') || false unless arguments.length > 0
       @set 'only_visible_to_overrides', override_flag
 
     isRestrictedByMasterCourse: ->
       @get('is_master_course_child_content') && @get('restricted_by_master_course')
+
+    showGradersAnonymousToGradersCheckbox: =>
+      @moderatedGrading() && @get('grader_comments_visible_to_graders')

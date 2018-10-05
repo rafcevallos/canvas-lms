@@ -28,14 +28,14 @@ module SIS
       end
 
       def generate(previous_data_path, current_data_path)
-        previous_import = SIS::CSV::Import.new(@root_account, files: [previous_data_path])
+        previous_import = SIS::CSV::ImportRefactored.new(@root_account, files: [previous_data_path], batch: @batch)
         previous_csvs = previous_import.prepare
-        current_import = SIS::CSV::Import.new(@root_account, files: [current_data_path])
+        current_import = SIS::CSV::ImportRefactored.new(@root_account, files: [current_data_path], batch: @batch)
         current_csvs = current_import.prepare
-        @batch.add_warnings(current_import.warnings)
-        @batch.add_errors(current_import.errors)
 
         output_csvs = generate_csvs(previous_csvs, current_csvs)
+        return unless output_csvs.any?
+
         output_file = Tempfile.new(["sis_csv_diff_generator", ".zip"])
         output_path = output_file.path
         output_file.close!
@@ -95,8 +95,11 @@ module SIS
         diff.generate(previous_csv, current_csv, deletes: ->(row) { row['status'] = status })
       end
 
-      def add_warning(csv, message)
-        @batch.add_warnings([[csv ? csv[:file] : "", message]])
+      def add_warning(csv, message, failure: false)
+        @batch.sis_batch_errors.create!(root_account: @batch.account,
+                                        message: message,
+                                        failure: failure,
+                                        file: csv ? csv[:file] : "")
       end
     end
   end

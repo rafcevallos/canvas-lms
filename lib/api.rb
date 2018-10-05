@@ -53,12 +53,12 @@ module Api
           @domain_root_account.default_enrollment_term
         when 'current'
           if !current_term
-            current_terms = @domain_root_account
-             .enrollment_terms
-             .active
-             .where("(start_at<=? OR start_at IS NULL) AND (end_at >=? OR end_at IS NULL) AND NOT (start_at IS NULL AND end_at IS NULL)", Time.now.utc, Time.now.utc)
-              .limit(2)
-              .to_a
+            current_terms = @domain_root_account.
+              enrollment_terms.
+              active.
+              where("(start_at<=? OR start_at IS NULL) AND (end_at >=? OR end_at IS NULL) AND NOT (start_at IS NULL AND end_at IS NULL)", Time.now.utc, Time.now.utc).
+              limit(2).
+              to_a
             current_term = current_terms.length == 1 ? current_terms.first : :nil
           end
           current_term == :nil ? nil : current_term
@@ -94,7 +94,8 @@ module Api
       { :lookups => { 'sis_course_id' => 'sis_source_id',
                       'id' => 'id',
                       'sis_integration_id' => 'integration_id',
-                      'lti_context_id' => 'lti_context_id' }.freeze,
+                      'lti_context_id' => 'lti_context_id',
+                      'uuid' => 'uuid' }.freeze,
         :is_not_scoped_to_account => ['id'].freeze,
         :scope => 'root_account_id' }.freeze,
     'enrollment_terms' =>
@@ -132,6 +133,11 @@ module Api
         :scope => 'root_account_id' }.freeze,
     'groups' =>
         { :lookups => { 'sis_group_id' => 'sis_source_id',
+                        'id' => 'id' }.freeze,
+          :is_not_scoped_to_account => ['id'].freeze,
+          :scope => 'root_account_id' }.freeze,
+    'group_categories' =>
+        { :lookups => { 'sis_group_category_id' => 'sis_source_id',
                         'id' => 'id' }.freeze,
           :is_not_scoped_to_account => ['id'].freeze,
           :scope => 'root_account_id' }.freeze,
@@ -377,7 +383,8 @@ module Api
     }
   end
 
-  PAGINATION_PARAMS = [:current, :next, :prev, :first, :last]
+  PAGINATION_PARAMS = [:current, :next, :prev, :first, :last].freeze
+  LINK_PRIORITY = [:next, :last, :prev, :current, :first].freeze
   EXCLUDE_IN_PAGINATION_LINKS = %w(page per_page access_token api_key)
   def self.build_links(base_url, opts={})
     links = build_links_hash(base_url, opts)
@@ -397,10 +404,27 @@ module Api
     qp = opts[:query_parameters] || {}
     qp = qp.with_indifferent_access.except(*EXCLUDE_IN_PAGINATION_LINKS)
     base_url += "#{qp.to_query}&" if qp.present?
-    PAGINATION_PARAMS.each_with_object({}) do |param, obj|
+
+    # Apache limits the HTTP response headers to 8KB total; with lots of query parameters, link headers can exceed this
+    # so prioritize the links we include and don't exceed (by default) 6KB in total
+    max_link_headers_size = Setting.get('pagination_max_link_headers_size', '6144').to_i
+    link_headers_size = 0
+    LINK_PRIORITY.each_with_object({}) do |param, obj|
       if opts[param].present?
-        obj[param] = "#{base_url}page=#{opts[param]}&per_page=#{opts[:per_page]}"
+        link = "#{base_url}page=#{opts[param]}&per_page=#{opts[:per_page]}"
+        return obj if link_headers_size + link.size > max_link_headers_size
+        link_headers_size += link.size
+        obj[param] = link
       end
+    end
+  end
+
+  def self.pagination_params(base_url)
+    if base_url.length > Setting.get('pagination_max_base_url_for_links', '1000').to_i
+      # to prevent Link headers from consuming too much of the 8KB Apache allows in response headers
+      ESSENTIAL_PAGINATION_PARAMS
+    else
+      PAGINATION_PARAMS
     end
   end
 
@@ -479,6 +503,7 @@ module Api
     # otherwise let HostUrl figure out what host is appropriate
     if self.respond_to?(:request)
       host, protocol = get_host_and_protocol_from_request
+      target_shard = Shard.current
     elsif self.respond_to?(:use_placeholder_host?) && use_placeholder_host?
       host = PLACEHOLDER_HOST
       protocol = PLACEHOLDER_PROTOCOL
@@ -500,7 +525,11 @@ module Api
     end
     html = rewriter.translate_content(html)
 
-    url_helper = Html::UrlProxy.new(self, context, host, protocol)
+    url_helper = Html::UrlProxy.new(self,
+                                    context,
+                                    host,
+                                    protocol,
+                                    target_shard: target_shard)
     account = Context.get_account(context) || @domain_root_account
     include_mobile = !(respond_to?(:in_app?, true) && in_app?)
     Html::Content.rewrite_outgoing(html, account, url_helper, include_mobile: include_mobile)

@@ -112,10 +112,10 @@ class Quizzes::QuizReportsController < ApplicationController
   def index
     if authorized_action(@quiz, @current_user, :read_statistics)
       all_versions = value_to_boolean(params[:includes_all_versions])
-
       stats = Quizzes::QuizStatistics::REPORTS.map do |report_type|
         @quiz.current_statistics_for(report_type, {
-          includes_all_versions: all_versions
+          includes_all_versions: all_versions,
+          includes_sis_ids: include_sis_ids?
         })
       end
 
@@ -161,7 +161,8 @@ class Quizzes::QuizReportsController < ApplicationController
     end
 
     statistics = @quiz.current_statistics_for(p[:report_type], {
-      includes_all_versions: value_to_boolean(p[:includes_all_versions])
+      includes_all_versions: value_to_boolean(p[:includes_all_versions]),
+      includes_sis_ids: include_sis_ids?
     })
 
     if statistics.generating_csv?
@@ -190,7 +191,6 @@ class Quizzes::QuizReportsController < ApplicationController
   end
 
   # @API Abort the generation of a report, or remove a previously generated one
-  # @beta
   #
   # This API allows you to cancel a previous request you issued for a report to
   # be generated. Or in the case of an already generated report, you'd like to
@@ -230,6 +230,10 @@ class Quizzes::QuizReportsController < ApplicationController
   end
 
   private
+
+  def include_sis_ids?
+    @context.grants_any_right?(@current_user, session, :read_sis, :manage_sis)
+  end
 
   def expose(stats, includes=[])
     stats = [ stats ] unless stats.is_a?(Array)

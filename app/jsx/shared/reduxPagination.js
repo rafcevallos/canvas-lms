@@ -15,6 +15,7 @@
  * You should have received a copy of the GNU Affero General Public License along
  * with this program. If not, see <http://www.gnu.org/licenses/>.
  */
+import flatMap from 'lodash/flatMap'
 
 import { combineReducers } from 'redux'
 import { handleActions } from 'redux-actions'
@@ -46,11 +47,12 @@ function createActionTypes (name) {
     start: `GET_${upperName}_START`,
     success: `GET_${upperName}_SUCCESS`,
     fail: `GET_${upperName}_FAIL`,
+    clear: `CLEAR_${upperName}_PAGE`,
   }
 }
 
 /**
- * Creates a reducer for an individual page that keeps track of loading
+ * Creates a reducer for an individual page that keep6s track of loading
  * state and data for that page
  *
  * @param {object} actions object returned by createActionTypes
@@ -61,9 +63,11 @@ function createActionTypes (name) {
       [actions.start]: () => LoadStates.LOADING,
       [actions.success]: () => LoadStates.LOADED,
       [actions.fail]: () => LoadStates.ERRORED,
+      [actions.clear]: () => LoadStates.NOT_LOADED,
     }, LoadStates.NOT_LOADED),
     items: handleActions({
       [actions.success]: (state, action) => action.payload.data,
+      [actions.clear]: () => [],
     }, []),
   })
 }
@@ -76,11 +80,22 @@ function createActionTypes (name) {
 function createPagesReducer (actions) {
   return function reducePages (state = {}, action) {
     const page = action.payload ? action.payload.page : null
-    if (!page) return state // page is a required prop on payload
-    const pageState = state[page]
-    return Object.assign({}, state, {
-      [page]: createReducePage(actions)(pageState, action)
-    })
+    const pages = action.payload ? action.payload.pages : null
+    if (page) {
+      const pageState = state[page]
+      return Object.assign({}, state, {
+        [page]: createReducePage(actions)(pageState, action),
+      })
+    } else if (pages) {
+      return pages.reduce((newState, curPage) => {
+        const pageState = state[curPage]
+        return Object.assign(newState, {
+          [curPage]: createReducePage(actions)(pageState, action),
+        })
+      }, Object.assign({}, state))
+    } else {
+      return state // page or pages is a required prop on payload
+    }
   }
 }
 
@@ -160,6 +175,38 @@ function wrapGetPageThunk (actions, name, thunk) {
   }
 }
 
+function fetchAllEntries(actions, totalCount, getThunk) {
+  return () => (dispatch, getState) => {
+    dispatch({ type: actions.start, payload: { page: 1 }})
+    const state = getState()
+    if(!totalCount || totalCount === 0) {
+      const successPayload = {
+        page: 1,
+        lastPage: 1,
+        data: [],
+      }
+      dispatch({ type: actions.success, payload: successPayload})
+    } else {
+      const promises = Array(Math.ceil(totalCount / 50))
+        .fill()
+        .map((_, i) => getThunk(state, {page: i + 1}))
+      Promise.all(promises)
+        .then(responses => {
+          const allDiscussions = flatMap(responses, resp => resp.data)
+          const successPayload = {
+            page: 1,
+            lastPage: 1,
+            data: allDiscussions,
+          }
+          dispatch({ type: actions.success, payload: successPayload})
+        })
+        .catch(err => {
+          dispatch({ type: actions.fail, payload: { page: 1, ...err } })
+        })
+    }
+  }
+}
+
 /**
  * Creates actions types and action creators for paginating a set of data
  *
@@ -174,6 +221,7 @@ function wrapGetPageThunk (actions, name, thunk) {
  *
  * @param {string} name name of the data set
  * @param {function} thunk function that will get our data
+ * @param {Object} options
  *
  * thunk must follow a promise-like interface:
  * @example
@@ -194,14 +242,27 @@ function wrapGetPageThunk (actions, name, thunk) {
  *
  * // calls fetchItems but dispatches START/SUCCESS/FAIL to store for the page
  * itemActions.actionCreators.getItems({ page: 3 })
+ *
+ * This also supports getting all paginated items at once. They will be stored
+ * as a single page in the redux store. To use this, you need to pass in
+ * `fetchAll` and a thunk that performs a HEAD request to your target
+ * endpoint. The endpoint must also support link headers, which contain how
+ * many pages need to be gathered.
  */
-export function createPaginationActions (name, thunk) {
+export function createPaginationActions (name, thunk, opts = {}) {
+  const fetchAll = opts.fetchAll || false
+  const totalCount = opts.totalCount
+
   const capitalizedName = name.charAt(0).toUpperCase() + name.slice(1)
   const actionTypes = createActionTypes(name)
+  const fetchFunction = fetchAll
+    ? () => fetchAllEntries(actionTypes, totalCount, thunk)
+    : () => wrapGetPageThunk(actionTypes, name, thunk)
+
   return {
     actionTypes: Object.keys(actionTypes).map(key => actionTypes[key]),
     actionCreators: {
-      [`get${capitalizedName}`]: wrapGetPageThunk(actionTypes, name, thunk),
+      [`get${capitalizedName}`]: fetchFunction()
     },
   }
 }

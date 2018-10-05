@@ -48,7 +48,7 @@ describe CollaborationsController do
 
       get 'index', params: {:course_id => @course.id}
 
-      expect(response).to be_success
+      expect(response).to be_successful
       expect(assigns(:user_has_google_drive)).to eq true
     end
 
@@ -58,7 +58,7 @@ describe CollaborationsController do
 
       get 'index', params: {:course_id => @course.id}
 
-      expect(response).to be_success
+      expect(response).to be_successful
       expect(assigns(:user_has_google_drive)).to eq false
     end
 
@@ -70,7 +70,7 @@ describe CollaborationsController do
       plugin_setting.save!
       get 'index', params: {:course_id => @course.id}
 
-      expect(response).to be_success
+      expect(response).to be_successful
       expect(assigns(:user_has_google_drive)).to be false
     end
 
@@ -93,7 +93,7 @@ describe CollaborationsController do
       #allow(controller).to receive(:google_docs_connection).and_return(double(authorized?:false))
 
       get 'index', params: {:group_id => group.id}
-      expect(response).to be_success
+      expect(response).to be_successful
     end
 
     it "only returns collaborations that the user has access to read" do
@@ -158,11 +158,12 @@ describe CollaborationsController do
       end
 
       it "should include avatar_image_url" do
-        get 'members', params: {id: @collab.id, include: ['avatar_image_url']}
         @student.avatar_image_url = 'https://www.example.com/awesome-avatar.png'
+        @student.save!
+        get 'members', params: {id: @collab.id, include: ['avatar_image_url']}
         hash = JSON.parse(@response.body).first
 
-        expect(hash['avatar_image_url']).to eq @student.lti_context_id
+        expect(hash['avatar_image_url']).to eq @student.avatar_image_url
       end
     end
   end

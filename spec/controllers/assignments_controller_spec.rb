@@ -149,12 +149,29 @@ describe AssignmentsController do
         :tool_id => 'Quizzes 2',
         :url => 'http://example.com/launch'
       )
+      @course.root_account.settings[:provision] = {'lti' => 'lti url'}
+      @course.root_account.save!
+      @course.root_account.enable_feature! :quizzes_next
+      @course.enable_feature! :quizzes_next
       get 'index', params: {course_id: @course.id}
       expect(assigns[:js_env][:QUIZ_LTI_ENABLED]).to be true
     end
 
     it "should not set QUIZ_LTI_ENABLED in js_env if quizzes 2 is not available" do
       user_session @teacher
+      get 'index', params: {course_id: @course.id}
+      expect(assigns[:js_env][:QUIZ_LTI_ENABLED]).to be false
+    end
+
+    it "should not set QUIZ_LTI_ENABLED in js_env if quizzes_next is not enabled" do
+      user_session @teacher
+      @course.context_external_tools.create!(
+        :name => 'Quizzes.Next',
+        :consumer_key => 'test_key',
+        :shared_secret => 'test_secret',
+        :tool_id => 'Quizzes 2',
+        :url => 'http://example.com/launch'
+      )
       get 'index', params: {course_id: @course.id}
       expect(assigns[:js_env][:QUIZ_LTI_ENABLED]).to be false
     end
@@ -199,83 +216,250 @@ describe AssignmentsController do
         expect(assigns[:js_env][:PERMISSIONS][:manage_course]).to be_truthy
       end
     end
+
+    describe "per-assignment permissions" do
+      let(:assignment_permissions) { assigns[:js_env][:PERMISSIONS][:by_assignment_id] }
+
+      before(:each) do
+        @course.enable_feature!(:moderated_grading)
+
+        @editable_assignment = @course.assignments.create!(
+          moderated_grading: true,
+          grader_count: 2,
+          final_grader: @teacher
+        )
+
+        user_session(@teacher)
+        ta_in_course(active_all: true)
+
+        @noneditable_assignment = @course.assignments.create!(
+          moderated_grading: true,
+          grader_count: 2,
+          final_grader: @ta
+        )
+      end
+
+      it "sets the 'update' attribute for an editable assignment to true" do
+        get 'index', params: {course_id: @course.id}
+        expect(assignment_permissions[@editable_assignment.id][:update]).to eq(true)
+      end
+
+      it "sets the 'update' attribute for a non-editable assignment to false" do
+        get 'index', params: {course_id: @course.id}
+        expect(assignment_permissions[@noneditable_assignment.id][:update]).to eq(false)
+      end
+    end
   end
 
   describe "GET 'show_moderate'" do
-    it "should set the js_env for URLS" do
+    before(:each) do
       user_session(@teacher)
-      assignment = @course.assignments.create(:title => "some assignment")
-      assignment.workflow_state = 'published'
-      assignment.moderated_grading = true
-      assignment.save!
-
-      get 'show_moderate', params: {:course_id => @course.id, :assignment_id => assignment.id}
-      expect(assigns[:js_env][:URLS][:student_submissions_url]).to eq "http://test.host/api/v1/courses/#{@course.id}/assignments/#{assignment.id}/submissions?include[]=user_summary&include[]=provisional_grades"
-      expect(assigns[:js_env][:URLS][:provisional_grades_base_url]).to eq "http://test.host/api/v1/courses/#{@course.id}/assignments/#{assignment.id}/provisional_grades"
+      course_with_user('TeacherEnrollment', {active_all: true, course: @course})
+      @other_teacher = @user
+      @assignment = @course.assignments.create!(
+        moderated_grading: true,
+        final_grader: @other_teacher,
+        grader_count: 2,
+        workflow_state: 'published'
+      )
     end
 
-    it "should set the js_env for ASSIGNMENT_TITLE" do
-      user_session(@teacher)
-      assignment = @course.assignments.create(:title => "some assignment")
-      assignment.workflow_state = 'published'
-      assignment.moderated_grading = true
-      assignment.save!
-
-      get 'show_moderate', params: {:course_id => @course.id, :assignment_id => assignment.id}
-      expect(assigns[:js_env][:ASSIGNMENT_TITLE]).to eq "some assignment"
+    it "renders the page when the current user is the selected moderator" do
+      user_session(@other_teacher)
+      get 'show_moderate', params: {course_id: @course.id, assignment_id: @assignment.id}
+      assert_status(200)
     end
 
-    describe 'permissions' do
-      before(:once) do
-        @user = User.create!
-        @custom_role = @course.root_account.roles.create!(name: 'CustomRole', base_role_type: 'TaEnrollment')
-        @course.root_account.role_overrides.create!(permission: :moderate_grades, role: @custom_role, enabled: true)
-        @course.root_account.role_overrides.create!(permission: :view_all_grades, role: @custom_role, enabled: false)
-        @course.root_account.role_overrides.create!(permission: :manage_grades, role: @custom_role, enabled: false)
-        @course.enroll_user(@user, 'TaEnrollment', role: @custom_role, active_all: true)
-        @assignment = @course.assignments.create!(workflow_state: 'published', moderated_grading: true)
+    it "renders unauthorized when the current user is not the selected moderator" do
+      user_session(@teacher)
+      get 'show_moderate', params: {course_id: @course.id, assignment_id: @assignment.id}
+      assert_unauthorized
+    end
+
+    it "renders unauthorized when no moderator is selected and the user is not an admin" do
+      @assignment.update!(final_grader: nil)
+      user_session(@teacher)
+      get 'show_moderate', params: {course_id: @course.id, assignment_id: @assignment.id}
+      assert_status(401)
+    end
+
+    it "renders unauthorized when no moderator is selected and the user is an admin without " \
+    "'Select Final Grade for Moderation' permission" do
+      @course.account.role_overrides.create!(role: admin_role, enabled: false, permission: :select_final_grade)
+      @assignment.update!(final_grader: nil)
+      user_session(account_admin_user)
+      get 'show_moderate', params: {course_id: @course.id, assignment_id: @assignment.id}
+      assert_status(401)
+    end
+
+    it "renders the page when the current user is an admin and not the selected moderator" do
+      account_admin_user(account: @course.root_account)
+      user_session(@admin)
+      get 'show_moderate', params: {course_id: @course.id, assignment_id: @assignment.id}
+      assert_status(200)
+    end
+
+    it "renders the page when no moderator is selected and the user is an admin with " \
+    "'Select Final Grade for Moderation' permission" do
+      @assignment.update!(final_grader: nil)
+      user_session(account_admin_user)
+      get 'show_moderate', params: {course_id: @course.id, assignment_id: @assignment.id}
+      assert_status(200)
+    end
+
+    describe "js_env" do
+      let_once(:grader_1) do
+        course_with_user('TeacherEnrollment', {active_all: true, course: @course})
+        @user
+      end
+      let_once(:grader_2) do
+        course_with_user('TeacherEnrollment', {active_all: true, course: @course})
+        @user
       end
 
-      before(:each) { user_session(@user) }
-      let(:permissions) { assigns[:js_env][:PERMISSIONS] }
+      let(:env) { assigns[:js_env] }
 
-      let(:allow_editing) do
-        override = @course.root_account.role_overrides.find_by(permission: 'manage_grades')
-        override.update!(enabled: true)
+      before :once do
+        @assignment.grade_student(@student, grader: grader_1, provisional: true, score: 10)
+        @assignment.grade_student(@student, grader: grader_2, provisional: true, score: 5)
       end
 
-      let(:allow_viewing) do
-        override = @course.root_account.role_overrides.find_by(permission: 'view_all_grades')
-        override.update!(enabled: true)
+      before :each do
+        @assignment.update_attributes(
+          moderated_grading: true,
+          final_grader: @other_teacher,
+          grader_count: 2
+        )
+        user_session(@other_teacher)
       end
 
-      it 'grants the user view permissions if they have "View all grades" permissions in the course' do
-        allow_viewing
-        get :show_moderate, params: {course_id: @course, assignment_id: @assignment}
-        expect(permissions[:view_grades]).to eq true
+      it "includes ASSIGNMENT.course_id" do
+        get :show_moderate, params: {course_id: @course.id, assignment_id: @assignment.id}
+        expect(env[:ASSIGNMENT][:course_id]).to be(@course.id)
       end
 
-      it 'grants the user view permissions if they have "Edit grades" permissions in the course' do
-        allow_editing
-        get :show_moderate, params: {course_id: @course, assignment_id: @assignment}
-        expect(permissions[:view_grades]).to eq true
+      it "includes ASSIGNMENT.id" do
+        get :show_moderate, params: {course_id: @course.id, assignment_id: @assignment.id}
+        expect(env[:ASSIGNMENT][:id]).to be(@assignment.id)
       end
 
-      it 'denies the user view permissions if they lack both "View all grades" and "Edit grades" \
-      permissions in the course' do
-        get :show_moderate, params: {course_id: @course, assignment_id: @assignment}
-        expect(permissions[:view_grades]).to eq false
+      it "includes ASSIGNMENT.grades_published" do
+        @assignment.update!(grades_published_at: 1.day.ago)
+        get :show_moderate, params: {course_id: @course.id, assignment_id: @assignment.id}
+        expect(env[:ASSIGNMENT][:grades_published]).to be(true)
       end
 
-      it 'grants the user edit permissions if they have "Edit grades" permissions in the course' do
-        allow_editing
-        get :show_moderate, params: {course_id: @course, assignment_id: @assignment}
-        expect(permissions[:edit_grades]).to eq true
+      it "includes ASSIGNMENT.muted" do
+        get :show_moderate, params: {course_id: @course.id, assignment_id: @assignment.id}
+        expect(env[:ASSIGNMENT][:muted]).to be(true)
       end
 
-      it 'denies the user edit permissions if they lack "Edit grades" permissions in the course' do
-        get :show_moderate, params: {course_id: @course, assignment_id: @assignment}
-        expect(permissions[:edit_grades]).to eq false
+      it "includes ASSIGNMENT.title" do
+        get :show_moderate, params: {course_id: @course.id, assignment_id: @assignment.id}
+        expect(env[:ASSIGNMENT][:title]).to eql(@assignment.title)
+      end
+
+      it "optionally sets CURRENT_USER.can_view_grader_identities to true" do
+        @assignment.update(grader_names_visible_to_final_grader: true)
+        get :show_moderate, params: {course_id: @course.id, assignment_id: @assignment.id}
+        expect(env[:CURRENT_USER][:can_view_grader_identities]).to be(true)
+      end
+
+      it "optionally sets CURRENT_USER.can_view_grader_identities to false" do
+        @assignment.update(grader_names_visible_to_final_grader: false)
+        get :show_moderate, params: {course_id: @course.id, assignment_id: @assignment.id}
+        expect(env[:CURRENT_USER][:can_view_grader_identities]).to be(false)
+      end
+
+      it "optionally sets CURRENT_USER.can_view_student_identities to true" do
+        @assignment.update(anonymous_grading: false)
+        get :show_moderate, params: {course_id: @course.id, assignment_id: @assignment.id}
+        expect(env[:CURRENT_USER][:can_view_student_identities]).to be(true)
+      end
+
+      it "optionally sets CURRENT_USER.can_view_student_identities to false" do
+        @assignment.update(anonymous_grading: true)
+        get :show_moderate, params: {course_id: @course.id, assignment_id: @assignment.id}
+        expect(env[:CURRENT_USER][:can_view_student_identities]).to be(false)
+      end
+
+      describe "CURRENT_USER.grader_id" do
+        it "is the id of the user when the user can see other grader identities" do
+          @assignment.moderation_graders.create!(anonymous_id: "other", user: @other_teacher)
+          get :show_moderate, params: {course_id: @course.id, assignment_id: @assignment.id}
+          expect(env[:CURRENT_USER][:grader_id]).to eql(@other_teacher.id)
+        end
+
+        context "when the user cannot see other grader identities" do
+          before :each do
+            @assignment.update(grader_names_visible_to_final_grader: false)
+          end
+
+          it "is the anonymous_id of the associated moderation grader when the user has graded" do
+            @assignment.moderation_graders.create!(anonymous_id: "other", user: @other_teacher)
+            get :show_moderate, params: {course_id: @course.id, assignment_id: @assignment.id}
+            expect(env[:CURRENT_USER][:grader_id]).to eql("other")
+          end
+
+          it "is nil when the user has not graded" do
+            get :show_moderate, params: {course_id: @course.id, assignment_id: @assignment.id}
+            expect(env[:CURRENT_USER][:grader_id]).to be_nil
+          end
+        end
+      end
+
+      it "includes CURRENT_USER.id" do
+        get :show_moderate, params: {course_id: @course.id, assignment_id: @assignment.id}
+        expect(env[:CURRENT_USER][:id]).to eql(@other_teacher.id)
+      end
+
+      describe "FINAL_GRADER.grader_id" do
+        it "is the id of the final grader when the current user can see other grader identities" do
+          @assignment.moderation_graders.create!(anonymous_id: "other", user: @other_teacher)
+          get :show_moderate, params: {course_id: @course.id, assignment_id: @assignment.id}
+          expect(env[:FINAL_GRADER][:grader_id]).to eql(@other_teacher.id)
+        end
+
+        context "when the current user cannot see other grader identities" do
+          before :each do
+            @assignment.update(grader_names_visible_to_final_grader: false)
+          end
+
+          it "is the anonymous_id of the final grader's moderation grader when the final grader has graded" do
+            @assignment.moderation_graders.create!(anonymous_id: "other", user: @other_teacher)
+            get :show_moderate, params: {course_id: @course.id, assignment_id: @assignment.id}
+            expect(env[:FINAL_GRADER][:grader_id]).to eql("other")
+          end
+
+          it "is nil when the final grader has not graded" do
+            get :show_moderate, params: {course_id: @course.id, assignment_id: @assignment.id}
+            expect(env[:FINAL_GRADER][:grader_id]).to be_nil
+          end
+        end
+      end
+
+      it "includes FINAL_GRADER.id when the assignment has a final grader" do
+        get :show_moderate, params: {course_id: @course.id, assignment_id: @assignment.id}
+        expect(env[:FINAL_GRADER][:id]).to eql(@other_teacher.id)
+      end
+
+      it "sets FINAL_GRADER to nil when the assignment does not have a final grader" do
+        user_session(account_admin_user)
+        @assignment.update(final_grader: nil)
+        get :show_moderate, params: {course_id: @course.id, assignment_id: @assignment.id}
+        expect(env[:FINAL_GRADER]).to be(nil)
+      end
+
+      it "includes moderation graders in GRADERS" do
+        get :show_moderate, params: {course_id: @course.id, assignment_id: @assignment.id}
+        moderation_grader_ids = @assignment.moderation_graders.map(&:id)
+        expect(env[:GRADERS].map {|grader| grader[:id]}).to match_array(moderation_grader_ids)
+      end
+
+      it "does not include the final grader in GRADERS" do
+        @assignment.moderation_graders.create!(anonymous_id: "other", user: @other_teacher)
+        get :show_moderate, params: {course_id: @course.id, assignment_id: @assignment.id}
+        expect(env[:GRADERS].map {|grader| grader[:id].to_s}).not_to include(@other_teacher.id.to_s)
       end
     end
   end
@@ -287,6 +471,13 @@ describe AssignmentsController do
 
       get 'show', params: {:course_id => @course.id, :id => Assignment.maximum(:id) + 100}
       assert_status(404)
+    end
+
+    it "doesn't fail on a public course with a nil user" do
+      course = course_factory(:active_all => true, :is_public => true)
+      assignment = assignment_model(:course => course, :submission_types => "online_url")
+      get 'show', params: {:course_id => course.id, :id => assignment.id}
+      assert_status(200)
     end
 
     it "should return unauthorized if not enrolled" do
@@ -336,7 +527,7 @@ describe AssignmentsController do
       user_session(@student)
       @assignment.submit_homework(@student, :submission_type => 'online_url', :url => 'http://www.google.com')
       get 'show', params: {:course_id => @course.id, :id => @assignment.id}
-      expect(response).to be_success
+      expect(response).to be_successful
       expect(assigns[:current_user_submission]).not_to be_nil
       expect(assigns[:assigned_assessments]).to eq []
     end
@@ -398,14 +589,15 @@ describe AssignmentsController do
 
       get 'show', params: {:course_id => @course.id, :id => @assignment.id}
       expect(response).not_to be_redirect
-      expect(response).to be_success
+      expect(response).to be_successful
     end
 
     it "should not show locked external tool assignments" do
       user_session(@student)
 
-      @assignment.lock_at = Time.now - 1.week
-      @assignment.unlock_at = Time.now + 1.week
+      @assignment.lock_at = 1.week.ago
+      @assignment.due_at = 10.days.ago
+      @assignment.unlock_at = 2.weeks.ago
       @assignment.submission_types = 'external_tool'
       @assignment.save
       # This is usually a ContentExternalTool, but it only needs to
@@ -448,7 +640,7 @@ describe AssignmentsController do
       allow(controller).to receive(:google_drive_connection).and_return(google_drive_mock)
       get 'show', params: {:course_id => @course.id, :id => a.id}
 
-      expect(response).to be_success
+      expect(response).to be_successful
       expect(assigns(:user_has_google_drive)).to be true
     end
 
@@ -478,7 +670,7 @@ describe AssignmentsController do
         @assignment.save!
 
         get 'show', params: {:course_id => @course.id, :id => @assignment.id}
-        expect(response).to be_success
+        expect(response).to be_successful
         aua = AssetUserAccess.where(user_id: @student, context_type: 'Course', context_id: @course).first
         expect(aua.asset_category).to eq 'assignments'
         expect(aua.asset_code).to eq @assignment.asset_string
@@ -507,6 +699,80 @@ describe AssignmentsController do
       user_session(@student)
       get 'syllabus', params: {:course_id => @course.id}
       expect(assigns[:syllabus_body]).not_to be_nil
+    end
+  end
+
+  describe "PUT 'toggle_mute'" do
+    it "should require authorization" do
+      put 'toggle_mute', params: { course_id: @course.id, assignment_id: @assignment.id, status: true }, format: 'json'
+      assert_unauthorized
+    end
+
+    context "while logged in" do
+      before :each do
+        user_session(@teacher)
+      end
+
+      context "with moderated grading on" do
+        before :each do
+          @assignment.update!(moderated_grading: true, grader_count: 1)
+        end
+
+        it "should fail if grades are not published, and status is false" do
+          put 'toggle_mute', params: { course_id: @course.id, assignment_id: @assignment.id, status: false }, format: 'json'
+          assert_unauthorized
+        end
+
+        it "should mute if grades are not published, and status is true" do
+          @assignment.update!(muted: false)
+          put 'toggle_mute', params: { course_id: @course.id, assignment_id: @assignment.id, status: true }, format: 'json'
+          @assignment.reload
+          expect(@assignment).to be_muted
+        end
+      end
+
+      it "should mute if status is true" do
+        @assignment.update!(muted: false)
+        put 'toggle_mute', params: { course_id: @course.id, assignment_id: @assignment.id, status: true }, format: 'json'
+        @assignment.reload
+        expect(@assignment).to be_muted
+      end
+
+      it "should unmute if status is false" do
+        @assignment.update_attribute(:muted, true)
+        put 'toggle_mute', params: { course_id: @course.id, assignment_id: @assignment.id, status: false }, format: 'json'
+        @assignment.reload
+        expect(@assignment).not_to be_muted
+      end
+
+      describe 'anonymize_students' do
+        it "is included in the response" do
+          put 'toggle_mute', params: { course_id: @course.id, assignment_id: @assignment.id, status: true }, format: 'json'
+          assignment_json = json_parse(response.body)['assignment']
+          expect(assignment_json).to have_key('anonymize_students')
+        end
+
+        it "is true if the assignment is anonymous and muted" do
+          @assignment.update!(anonymous_grading: true)
+          @assignment.unmute!
+          put 'toggle_mute', params: { course_id: @course.id, assignment_id: @assignment.id, status: true }, format: 'json'
+          assignment_json = json_parse(response.body)['assignment']
+          expect(assignment_json.fetch('anonymize_students')).to be true
+        end
+
+        it "is false if the assignment is anonymous and unmuted" do
+          @assignment.update!(anonymous_grading: true)
+          put 'toggle_mute', params: { course_id: @course.id, assignment_id: @assignment.id, status: false }, format: 'json'
+          assignment_json = json_parse(response.body)['assignment']
+          expect(assignment_json.fetch('anonymize_students')).to be false
+        end
+
+        it "is false if the assignment is not anonymous" do
+          put 'toggle_mute', params: { course_id: @course.id, assignment_id: @assignment.id, status: true }, format: 'json'
+          assignment_json = json_parse(response.body)['assignment']
+          expect(assignment_json.fetch('anonymize_students')).to be false
+        end
+      end
     end
   end
 
@@ -649,6 +915,25 @@ describe AssignmentsController do
       let(:request_params) { [:edit, params: {course_id: course, id: @assignment}] }
     end
 
+    shared_examples 'course feature flags for Anonymous Moderated Marking' do
+      before(:each) do
+        user_session(@teacher)
+      end
+
+      it 'is false when the feature flag is not enabled' do
+        get 'edit', params: { course_id: @course.id, id: @assignment.id }
+
+        expect(assigns[:js_env][js_env_attribute]).to be false
+      end
+
+      it 'is true when the feature flag is enabled' do
+        @course.enable_feature!(feature_flag)
+        get 'edit', params: { course_id: @course.id, id: @assignment.id }
+
+        expect(assigns[:js_env][js_env_attribute]).to be true
+      end
+    end
+
     it "should require authorization" do
       #controller.use_rails_error_handling!
       get 'edit', params: {:course_id => @course.id, :id => @assignment.id}
@@ -701,41 +986,35 @@ describe AssignmentsController do
       expect(assigns[:js_env][:SIS_NAME]).to eq('Foo Bar')
     end
 
-    describe 'js_env ANONYMOUS_INSTRUCTOR_ANNOTATIONS_ENABLED' do
-      before(:each) do
-        user_session(@teacher)
-      end
+    it 'js_env AVAILABLE_MODERATORS includes the name and id for each available moderator' do
+      user_session(@teacher)
+      @assignment.update!(grader_count: 2, moderated_grading: true)
+      get :edit, params: { course_id: @course.id, id: @assignment.id }
+      expected_moderators = @course.instructors.map { |user| { name: user.name, id: user.id } }
+      expect(assigns[:js_env][:AVAILABLE_MODERATORS]).to match_array expected_moderators
+    end
 
-      after(:each) do
-        ENV.delete('ANONYMOUS_INSTRUCTOR_ANNOTATIONS')
-      end
-
-      it 'is true when the ANONYMOUS_INSTRUCTOR_ANNOTATIONS environment variable is set to true' do
-        ENV['ANONYMOUS_INSTRUCTOR_ANNOTATIONS'] = 'true'
-        get 'edit', params: { course_id: @course.id, id: @assignment.id }
-
-        expect(assigns[:js_env][:ANONYMOUS_INSTRUCTOR_ANNOTATIONS_ENABLED]).to be true
-      end
-
-      it 'is false when the ANONYMOUS_INSTRUCTOR_ANNOTATIONS environment variable is set to false' do
-        ENV['ANONYMOUS_INSTRUCTOR_ANNOTATIONS'] = 'false'
-        get 'edit', params: { course_id: @course.id, id: @assignment.id }
-
-        expect(assigns[:js_env][:ANONYMOUS_INSTRUCTOR_ANNOTATIONS_ENABLED]).to be false
-      end
-
-      it 'is false when the ANONYMOUS_INSTRUCTOR_ANNOTATIONS environment variable is not set' do
-        get 'edit', params: { course_id: @course.id, id: @assignment.id }
-
-        expect(assigns[:js_env][:ANONYMOUS_INSTRUCTOR_ANNOTATIONS_ENABLED]).to be false
-      end
+    it 'js_env MODERATED_GRADING_MAX_GRADER_COUNT is the max grader count for the assignment' do
+      user_session(@teacher)
+      get :edit, params: { course_id: @course.id, id: @assignment.id }
+      expect(assigns[:js_env][:MODERATED_GRADING_MAX_GRADER_COUNT]).to eq @assignment.moderated_grading_max_grader_count
     end
 
     context 'plagiarism detection platform' do
       include_context 'lti2_spec_helper'
 
-      it "bootstraps the correct message_handler id for LTI 2 tools to js_env" do
-        user_session(@teacher)
+      let(:service_offered) do
+        [
+          {
+            "endpoint" => "http://originality.docker/eula",
+            "action" => ["GET"],
+            "@id" => "http://originality.docker/lti/v2/services#vnd.Canvas.Eula",
+            "@type" => "RestService"
+          }
+        ]
+      end
+
+      before do
         allow_any_instance_of(AssignmentConfigurationToolLookup).to receive(:create_subscription).and_return true
         allow(Lti::ToolProxy).to receive(:find_active_proxies_for_context).with(@course) { Lti::ToolProxy.where(id: tool_proxy.id) }
         tool_proxy.resources << resource_handler
@@ -747,9 +1026,21 @@ describe AssignmentsController do
           tool_type: 'Lti::MessageHandler',
           tool_id: message_handler.id
         )
+      end
 
+      it "bootstraps the correct message_handler id for LTI 2 tools to js_env" do
+        user_session(@teacher)
         get 'edit', params: {:course_id => @course.id, :id => @assignment.id}
         expect(assigns[:js_env][:SELECTED_CONFIG_TOOL_ID]).to eq message_handler.id
+      end
+
+      it "bootstraps the correct EULA link for the associated LTI 2 tool" do
+        tool_proxy.raw_data['tool_profile']['service_offered'] = service_offered
+        tool_proxy.save!
+
+        user_session(@student)
+        get 'show', params: {:course_id => @course.id, :id => @assignment.id}
+        expect(assigns[:js_env][:EULA_URL]).to eq service_offered[0]['endpoint']
       end
     end
 
@@ -801,6 +1092,20 @@ describe AssignmentsController do
         user_session(@teacher)
         get 'edit', params: {:course_id => @course.id, :id => @assignment.id}
         expect(assigns[:js_env][:dummy]).to be nil
+      end
+    end
+
+    describe 'js_env ANONYMOUS_GRADING_ENABLED' do
+      it_behaves_like 'course feature flags for Anonymous Moderated Marking' do
+        let(:js_env_attribute) { :ANONYMOUS_GRADING_ENABLED }
+        let(:feature_flag) { :anonymous_marking }
+      end
+    end
+
+    describe 'js_env MODERATED_GRADING_ENABLED' do
+      it_behaves_like 'course feature flags for Anonymous Moderated Marking' do
+        let(:js_env_attribute) { :MODERATED_GRADING_ENABLED }
+        let(:feature_flag) { :moderated_grading }
       end
     end
   end

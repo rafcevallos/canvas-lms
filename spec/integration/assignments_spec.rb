@@ -47,7 +47,7 @@ describe "assignments" do
     course_with_teacher_logged_in(:course => @course, :active_all => true)
     get "/courses/#{@course.id}/assignments/#{@assignment.id}"
 
-    expect(response).to be_success
+    expect(response).to be_successful
     expect(Nokogiri::HTML(response.body).at_css('.graded_count').text).to match(/0 out of 2/)
   end
 
@@ -61,7 +61,7 @@ describe "assignments" do
 
     get "/courses/#{@course.id}/assignments/#{@assignment.id}"
 
-    expect(response).to be_success
+    expect(response).to be_successful
     expect(Nokogiri::HTML(response.body).at_css('.graded_count').text).to match(/0 out of 1/)
   end
 
@@ -73,7 +73,7 @@ describe "assignments" do
 
     get "/courses/#{@course.id}/assignments/#{@assignment.id}"
 
-    expect(response).to be_success
+    expect(response).to be_successful
     expect(Nokogiri::HTML(response.body).at_css('.graded_count').text).to match(/0 out of 1/)
   end
 
@@ -140,7 +140,18 @@ describe "download submissions link" do
 
   it "should not show download submissions button with no submissions" do
     get "/courses/#{@course.id}/assignments/#{@assignment.id}"
-    expect(response).to be_success
+    expect(response).to be_successful
+    doc = Nokogiri::XML(response.body)
+    expect(doc.at_css('#download_submission_button')).to be_nil
+  end
+
+  it "should not show download submissions button with no submissions from active students" do
+    @submission = @assignment.submissions.find_by!(user: @student)
+    @submission.update(submission_type: 'online_url')
+    @student.enrollments.each(&:conclude)
+
+    get "/courses/#{@course.id}/assignments/#{@assignment.id}"
+    expect(response).to be_successful
     doc = Nokogiri::XML(response.body)
     expect(doc.at_css('#download_submission_button')).to be_nil
   end
@@ -151,7 +162,7 @@ describe "download submissions link" do
     expect(@submission.state).to eql(:submitted)
 
     get "/courses/#{@course.id}/assignments/#{@assignment.id}"
-    expect(response).to be_success
+    expect(response).to be_successful
     doc = Nokogiri::XML(response.body)
     expect(doc.at_css('#download_submission_button')).not_to be_nil
   end
@@ -167,7 +178,7 @@ describe "download submissions link" do
     @submission2.update!(submission_type: 'online_url')
 
     get "/courses/#{@course.id}/assignments/#{@assignment.id}"
-    expect(response).to be_success
+    expect(response).to be_successful
     doc = Nokogiri::XML(response.body)
     expect(doc.at_css('#download_submission_button')).not_to be_nil
   end
@@ -187,7 +198,7 @@ describe "download submissions link" do
     expect(@submission2.state).to eql(:graded)
 
     get "/courses/#{@course.id}/assignments/#{@assignment.id}"
-    expect(response).to be_success
+    expect(response).to be_successful
     doc = Nokogiri::XML(response.body)
     expect(doc.at_css('#download_submission_button')).not_to be_nil
   end
@@ -198,7 +209,7 @@ describe "download submissions link" do
     expect(@submission.state).to eql(:submitted)
     user_session(@student)
     get "/courses/#{@course.id}/assignments/#{@assignment.id}"
-    expect(response).to be_success
+    expect(response).to be_successful
     doc = Nokogiri::XML(response.body)
     expect(doc.at_css('#download_submission_button')).to be_nil
   end
@@ -227,7 +238,7 @@ describe "ratio of submissions graded" do
   it "should not show ratio of submissions graded with no submissions" do
 
     get "/courses/#{@course.id}/assignments/#{@assignment.id}"
-    expect(response).to be_success
+    expect(response).to be_successful
     doc = Nokogiri::XML(response.body)
     expect(doc.at_css('#ratio_of_submissions_graded')).to be_nil
   end
@@ -241,7 +252,7 @@ describe "ratio of submissions graded" do
     expect(@submission2.state).to eql(:submitted)
 
     get "/courses/#{@course.id}/assignments/#{@assignment.id}"
-    expect(response).to be_success
+    expect(response).to be_successful
     doc = Nokogiri::XML(response.body)
     expect(doc.at_css('#ratio_of_submissions_graded').text.strip).to eq "0 out of 2 Submissions Graded"
   end
@@ -257,7 +268,7 @@ describe "ratio of submissions graded" do
     @submission2.update!(submission_type: 'online_url')
 
     get "/courses/#{@course.id}/assignments/#{@assignment.id}"
-    expect(response).to be_success
+    expect(response).to be_successful
     doc = Nokogiri::XML(response.body)
     expect(doc.at_css('#ratio_of_submissions_graded').text.strip).to eq "1 out of 2 Submissions Graded"
   end
@@ -277,7 +288,7 @@ describe "ratio of submissions graded" do
     expect(@submission2.state).to eql(:graded)
 
     get "/courses/#{@course.id}/assignments/#{@assignment.id}"
-    expect(response).to be_success
+    expect(response).to be_successful
     doc = Nokogiri::XML(response.body)
     expect(doc.at_css('#ratio_of_submissions_graded').text.strip).to eq "2 out of 2 Submissions Graded"
   end
@@ -289,9 +300,24 @@ describe "ratio of submissions graded" do
 
     user_session(@student)
     get "/courses/#{@course.id}/assignments/#{@assignment.id}"
-    expect(response).to be_success
+    expect(response).to be_successful
     doc = Nokogiri::XML(response.body)
     expect(doc.at_css('#ratio_of_submissions_graded')).to be_nil
   end
 
+  describe 'assignment moderation' do
+    let(:moderate_button) { Nokogiri::HTML(response.body).at_css('#moderated_grading_button') }
+
+    it 'shows the moderation link for moderated assignments' do
+      @assignment.update!(moderated_grading: true, grader_count: 1, final_grader: @teacher)
+
+      get "/courses/#{@course.id}/assignments/#{@assignment.id}"
+      expect(moderate_button).not_to be_nil
+    end
+
+    it 'does not show the moderation link for non-moderated assignments' do
+      get "/courses/#{@course.id}/assignments/#{@assignment.id}"
+      expect(moderate_button).to be_nil
+    end
+  end
 end

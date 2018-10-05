@@ -26,7 +26,7 @@ group :test do
   gem 'simplecov', '0.15.1', require: false
     gem 'docile', '1.1.5', require: false
   gem 'simplecov-rcov', '0.2.3', require: false
-  gem 'puma', '3.11.0'
+  gem 'puma', '3.11.3'
 
   gem 'rspec', '3.7.0'
   gem 'rspec_around_all', '0.2.0'
@@ -37,20 +37,20 @@ group :test do
   gem 'rubocop-canvas', require: false, path: 'gems/rubocop-canvas'
     gem 'rubocop', '0.52.1', require: false
       gem 'rainbow', '3.0.0', require: false
-  gem 'rubocop-rspec', '1.21.0', require: false
+  gem 'rubocop-rspec', '1.22.2', require: false
 
-  gem 'once-ler', '0.1.2'
+  gem 'once-ler', '0.1.4'
 
   # Keep this gem synced with docker-compose/seleniumff/Dockerfile
-  gem 'selenium-webdriver', '2.53.4'
-    gem 'childprocess', '0.8.0', require: false
+  gem 'selenium-webdriver', '3.14.0'
+    gem 'childprocess', '0.9.0', require: false
     gem 'websocket', '1.2.5', require: false
   gem 'chromedriver-helper', require: false
   gem 'selinimum', '0.0.1', require: false, path: 'gems/selinimum'
-  gem 'test-queue', github: 'instructure/test-queue', ref: '1b92ebbca70705599c78a1bad5b16d6a37f741f2', require: false
-  gem 'testrailtagging', '0.3.8.3', require: false
+  gem 'test-queue', github: 'instructure/test-queue', ref: 'd35166408df3a5396cd809e85dcba175136a69ba', require: false
+  gem 'testrailtagging', '0.3.8.4', require: false
 
-  gem 'webmock', '3.1.1', require: false
+  gem 'webmock', '3.3.0', require: false
     gem 'crack', '0.4.3', require: false
   gem 'timecop', '0.9.1'
   gem 'jira_ref_parser', '1.0.1'
@@ -58,4 +58,9 @@ group :test do
   gem 'escape_code', '0.2', require: false
   gem 'hashdiff', '0.3.7'
   gem 'luminosity_contrast', '0.2.1'
+  gem 'pact-support', github: 'tucker-m/pact-support', tag: 'pr1.2'
+  gem 'pact', github: 'tucker-m/pact-ruby', tag: 'pr1.2'
+  gem 'pact-messages', '0.2.0'
+  gem 'pact_broker-client'
+  gem 'database_cleaner', '~> 1.5', '>= 1.5.3'
 end

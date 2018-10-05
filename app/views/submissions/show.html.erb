@@ -134,6 +134,7 @@
         <% if @assignment.rubric_association && (
              @submission.user_can_read_grade?(@current_user, session) ||
              @assignment.rubric_association.user_can_assess_for?(assessor: @current_user, assessee: @submission.user) ||
+             @assignment.rubric_association.user_did_assess_for?(assessor: @current_user, assessee: @submission.user) ||
              can_do(@assignment.rubric, @current_user, :read)
            )
         %>
@@ -195,16 +196,16 @@
 
   <% if @assignment.rubric_association %>
     <% @visible_rubric_assessments ||= [] %>
-  <div id="rubric_holder" style="position: absolute; right: 0px; padding: 5px; background-color: #fff; border: 1px solid #aaa; border-right-width: 0; display: none;">
+  <div id="rubric_holder" style="position: absolute; <%= direction('right') %>: 0px; padding: 5px; background-color: #fff; border: 1px solid #aaa; border-<%= direction('right') %>-width: 0; display: none;">
     <a
       class="hide_rubric_link"
-      style="float: right; margin-right:0 !important;"
+      style="float: <%= direction('right') %>; margin-<%= direction('right') %>:0 !important;"
       title="<%= t('hide_rubric_button', 'Hide Rubric') %>"
       role="button"
       aria-label="<%= t('hide_rubric_button', 'Hide Rubric') %>"
       tabindex='0'
     ><i class="icon-x standalone-icon"></i></a>
-    <div id="rubric_assessments_list" style="text-align: right; margin-bottom: 5px; <%= hidden if @assessment_request || @visible_rubric_assessments.empty? %>">
+    <div id="rubric_assessments_list" style="text-align: <%= direction('right') %>; margin-bottom: 5px; <%= hidden if @assessment_request || @visible_rubric_assessments.empty? %>">
       <%= before_label('show_assessment_by', 'Show Assessment By') %>
       <select id="rubric_assessments_select">
         <% @visible_rubric_assessments.each do |assessment| %>
@@ -228,6 +229,7 @@
         partial: 'shared/rubric',
         object: @assignment.rubric,
         locals: {
+          rubric_association: @assignment.rubric_association,
           assessing: @submission.grants_right?(@current_user, :grade) || currently_peer_reviewing
         }}) %>
     <% end %>
@@ -257,7 +259,7 @@
       <div style="background-color: #fff;">
         <a href="#" class="comments_link" style="display: none; <%= 'font-weight: bold;' unless @submission.submission_comments.empty? %>">Comments <% unless @submission.submission_comments.empty? %>(<%= @submission.submission_comments.length %>)<% end %></a>
         <div class="comments">
-          <button type="button" class="btn button-secondary cancel_comment_button" style="display: none; float: right; margin-right:0 !important;"><%= image_tag("delete_circle.png", :alt => t('Delete')) %></button>
+          <button type="button" class="btn button-secondary cancel_comment_button" style="display: none; float: <%= direction('right') %>; margin-<%= direction('right') %>:0 !important;"><%= image_tag("delete_circle.png", :alt => t('Delete')) %></button>
           <div class="comment_list" aria-live="polite" style="padding: 10px; clear:right;">
             <% unless @submission.user_can_read_grade?(@current_user, session) %>
               <% if @assignment.muted? %>
@@ -267,11 +269,11 @@
               <% end %>
               <br/><br/>
             <% end %>
-            <% @submission.visible_submission_comments.each do |comment| %>
+            <% @submission.submission_comments.each do |comment| %>
               <% if can_do(comment, @current_user, :read) %>
               <div class="comment <%= 'draft' if comment.draft? %>" id="submission_comment_<%= comment.id %>" style="margin-bottom: 10px;">
                 <div class="comment" style="color: #444;">
-                  <% if comment.media_comment_id && comment.media_comment_type %>
+                  <% if comment.media_comment_id %>
                     <div class="comment_media">
                       <%= t('media_comment_link', "This is a media comment, *click here to view*.", :wrapper => '<br/><a href="#" class="play_comment_link media-comment">\1</a>.') %>
                       <span class="media_comment_id" style="display: none;"><%= comment.media_comment_id %></span>
@@ -282,14 +284,14 @@
                     <span style="white-space: pre-wrap;"><%= comment.comment %></span>
                   <% end %>
                 </div>
-                <div class="comment_attachments" style="text-align: right; margin-right: 10px;">
+                <div class="comment_attachments" style="text-align: <%= direction('right') %>; margin-<%= direction('right') %>: 10px;">
                   <% comment.attachments.each do |attachment| %>
                     <div class="comment_attachment">
                       <a href="<%= context_url(@context, :context_assignment_submission_url, @assignment.id, @submission.user_id, :comment_id => comment.id, :download => attachment.id) %>" class="comment_attachment_link <%= attachment.mime_class %>"><%= attachment.display_name %></a>
                     </div>
                   <% end %>
                 </div>
-                <div style="text-align: right; font-size: 0.8em; color: #888;">
+                <div style="text-align: <%= direction('right') %>; font-size: 0.8em; color: #888;">
                   <span class="author_name">
                     <%= comment_author_name_for(comment) %>
                   </span>,
@@ -310,8 +312,8 @@
           </div>
           <div class="comment" id="comment_blank" style="display: none; margin-bottom: 10px;">
             <span class="comment" style="color: #444; white-space: pre-wrap;"></span>
-            <div class="comment_attachments" style="text-align: right; margin-right: 10px;"></div>
-            <div style="text-align: right; font-size: 0.8em; color: #888;">
+            <div class="comment_attachments" style="text-align: <%= direction('right') %>; margin-<%= direction('right') %>: 10px;"></div>
+            <div style="text-align: <%= direction('right') %>; font-size: 0.8em; color: #888;">
               <span class="author_name">&nbsp;</span>,
               <span class="posted_at">&nbsp;</span>
             </div>
@@ -326,22 +328,42 @@
           </div>
           <div style="padding: 10px; <%= hidden unless can_do(@submission, @current_user, :comment) %>" id="add_comment_form">
             <strong><%= before_label('add_a_comment', 'Add a Comment') %></strong>
-            <span><br/><%= t('teachers_notified_of_comments', 'Teachers and submitter will be notified of all comments.') %></span>
             <textarea class="ic-Input grading_comment"></textarea>
             <div class="comment_attachments">
             </div>
-            <div class="clearfix" style="text-align: right;">
+            <div class="clearfix" style="text-align: <%= direction('right') %>;">
               <% if feature_enabled?(:kaltura) %>
-                <a href="#" style="float: left;" class="media_comment_link media-comment"><%= t('media_comment', 'Media Comment') %></a>
+                <a href="#" class="media_comment_link media-comment pull-left"><%= t('media_comment', 'Media Comment') %></a>
               <% end %>
-              <a href="#" style="float: right;" class="attach_comment_file_link"><%= t('attach_file', 'Attach File') %></a>
+              <a href="#" style="float: <%= direction('right') %>;" class="attach_comment_file_link"><%= t('attach_file', 'Attach File') %></a>
               <div class="clear"></div>
             </div>
             <% if @assignment.has_group_category? && can_do(@submission, @current_user, :make_group_comment) %>
-              <label class="checkbox" for="submission_group_comment">
-                <input type="checkbox" name="group_comment" id="submission_group_comment"/>
-                <%= t('sent_to_whole_group', 'Send Comment to the Whole Group') %>
-              </label>
+              <% if @assignment.grade_as_group? %>
+                <span><%= t("All comments are sent to the whole group.") %></span>
+                <input type="checkbox" name="submission[group_comment]" id="submission_group_comment" style="display:none" checked />
+              <% else %>
+                <fieldset class="ic-Fieldset ic-Fieldset--radio-checkbox">
+                  <div class="ic-Form-control ic-Form-control--radio">
+                    <div class="ic-Radio">
+                      <input type="radio" name="submission[group_comment]" id="not_submission_group_comment" value="0" checked />
+                      <label class="ic-Label" for="not_submission_group_comment">
+                        <% if can_do(@submission, @current_user, :grade) %>
+                          <%= t('Send comment to this student only') %>
+                        <% else %>
+                          <%= t('Send comment to instructor only') %>
+                        <% end %>
+                      </label>
+                    </div>
+                    <div class="ic-Radio">
+                      <input type="radio" name="submission[group_comment]" id="submission_group_comment" value="1" />
+                      <label class="ic-Label" for="submission_group_comment">
+                        <%= t('sent_to_whole_group', 'Send comment to the whole group') %>
+                      </label>
+                    </div>
+                  </div>
+                </fieldset>
+              <% end %>
             <% end %>
             <div class="button-container">
               <button type="button" class="Button Button--primary save_comment_button"><%= t('buttons.save', 'Save') %></button>

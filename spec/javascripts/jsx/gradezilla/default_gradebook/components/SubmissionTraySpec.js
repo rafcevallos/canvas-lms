@@ -17,7 +17,7 @@
  */
 
 import React from 'react';
-import { mount, ReactWrapper } from 'enzyme';
+import { mount, ReactWrapper, shallow } from 'old-enzyme-2.x-you-need-to-upgrade-this-spec-to-enzyme-3.x-by-importing-just-enzyme';
 import SubmissionCommentCreateForm from 'jsx/gradezilla/default_gradebook/components/SubmissionCommentCreateForm';
 import SubmissionTray from 'jsx/gradezilla/default_gradebook/components/SubmissionTray';
 
@@ -41,73 +41,77 @@ QUnit.module('SubmissionTray', function (hooks) {
     clock.restore();
   });
 
+  const defaultProps = {
+    contentRef (ref) {
+      content = ref;
+    },
+    colors: {
+      late: '#FEF7E5',
+      missing: '#F99',
+      excused: '#E5F3FC'
+    },
+    editedCommentId: null,
+    editSubmissionComment () {},
+    enterGradesAs: 'points',
+    gradingDisabled: false,
+    gradingScheme: [['A', 0.90], ['B+', 0.85], ['B', 0.80], ['B-', 0.75]],
+    locale: 'en',
+    onAnonymousSpeedGraderClick () {},
+    onGradeSubmission () {},
+    onRequestClose () {},
+    onClose () {},
+    submissionUpdating: false,
+    isOpen: true,
+    courseId: '1',
+    currentUserId: '2',
+    speedGraderEnabled: true,
+    student: {
+      id: '27',
+      name: 'Jane Doe',
+      gradesUrl: 'http://gradeUrl/',
+      isConcluded: false
+    },
+    submission: {
+      assignmentId: '30',
+      excused: false,
+      grade: '100%',
+      id: '2501',
+      late: false,
+      missing: false,
+      pointsDeducted: 3,
+      secondsLate: 0
+    },
+    updateSubmission () {},
+    updateSubmissionComment () {},
+    assignment: {
+      anonymizeStudents: false,
+      name: 'Book Report',
+      gradingType: 'points',
+      htmlUrl: 'http://htmlUrl/',
+      muted: false,
+      published: true
+    },
+    isFirstAssignment: true,
+    isLastAssignment: true,
+    selectNextAssignment () {},
+    selectPreviousAssignment () {},
+    isFirstStudent: true,
+    isLastStudent: true,
+    selectNextStudent () {},
+    selectPreviousStudent () {},
+    submissionCommentsLoaded: true,
+    createSubmissionComment () {},
+    deleteSubmissionComment () {},
+    processing: false,
+    setProcessing () {},
+    submissionComments: [],
+    isInOtherGradingPeriod: false,
+    isInClosedGradingPeriod: false,
+    isInNoGradingPeriod: false,
+    isNotCountedForScore: false
+  };
+
   function mountComponent (props) {
-    const defaultProps = {
-      contentRef (ref) {
-        content = ref;
-      },
-      colors: {
-        late: '#FEF7E5',
-        missing: '#F99',
-        excused: '#E5F3FC'
-      },
-      editedCommentId: null,
-      editSubmissionComment () {},
-      enterGradesAs: 'points',
-      gradingDisabled: false,
-      gradingScheme: [['A', 0.90], ['B+', 0.85], ['B', 0.80], ['B-', 0.75]],
-      locale: 'en',
-      onGradeSubmission () {},
-      onRequestClose () {},
-      onClose () {},
-      submissionUpdating: false,
-      isOpen: true,
-      courseId: '1',
-      currentUserId: '2',
-      speedGraderEnabled: true,
-      student: {
-        id: '27',
-        name: 'Jane Doe',
-        gradesUrl: 'http://gradeUrl/',
-        isConcluded: false
-      },
-      submission: {
-        assignmentId: '30',
-        excused: false,
-        grade: '100%',
-        id: '2501',
-        late: false,
-        missing: false,
-        pointsDeducted: 3,
-        secondsLate: 0
-      },
-      updateSubmission () {},
-      updateSubmissionComment () {},
-      assignment: {
-        name: 'Book Report',
-        gradingType: 'points',
-        htmlUrl: 'http://htmlUrl/',
-        muted: false,
-        published: true
-      },
-      isFirstAssignment: true,
-      isLastAssignment: true,
-      selectNextAssignment () {},
-      selectPreviousAssignment () {},
-      isFirstStudent: true,
-      isLastStudent: true,
-      selectNextStudent () {},
-      selectPreviousStudent () {},
-      submissionCommentsLoaded: true,
-      createSubmissionComment () {},
-      deleteSubmissionComment () {},
-      processing: false,
-      setProcessing () {},
-      submissionComments: [],
-      isInOtherGradingPeriod: false,
-      isInClosedGradingPeriod: false,
-      isInNoGradingPeriod: false
-    };
     wrapper = mount(<SubmissionTray {...defaultProps} {...props} />);
     clock.tick(50); // wait for Tray to transition open
   }
@@ -193,10 +197,32 @@ QUnit.module('SubmissionTray', function (hooks) {
   });
 
   test('shows SpeedGrader link if enabled', function () {
-    const speedGraderUrl = '/courses/1/gradebook/speed_grader?assignment_id=30#%7B%22student_id%22%3A27%7D';
+    const speedGraderUrl = encodeURI('/courses/1/gradebook/speed_grader?assignment_id=30#{"student_id":"27"}');
     mountComponent();
     const speedGraderLink = document.querySelector('.SubmissionTray__Container a[href*="speed_grader"]').getAttribute('href');
     strictEqual(speedGraderLink, speedGraderUrl);
+  });
+
+  test('invokes "onAnonymousSpeedGraderClick" when the SpeedGrader link is clicked if the assignment is anonymous', function () {
+    const props = {
+      assignment: {
+        anonymizeStudents: true,
+        name: 'Book Report',
+        gradingType: 'points',
+        htmlUrl: 'http://htmlUrl/',
+        published: true
+      },
+      onAnonymousSpeedGraderClick: sinon.stub()
+    }
+    mountComponent(props)
+    document.querySelector('.SubmissionTray__Container a[href*="speed_grader"]').click()
+    strictEqual(props.onAnonymousSpeedGraderClick.callCount, 1)
+  })
+
+  test('omits student_id from SpeedGrader link if enabled and assignment has anonymized students', function() {
+    mountComponent({assignment: {anonymizeStudents: true}});
+    const speedGraderLink = document.querySelector('.SubmissionTray__Container a[href*="speed_grader"]').getAttribute('href');
+    notOk(speedGraderLink.match(/student_id/))
   });
 
   test('does not show SpeedGrader link if disabled', function () {
@@ -208,9 +234,10 @@ QUnit.module('SubmissionTray', function (hooks) {
   test('shows avatar if avatar is not null', function () {
     const avatarUrl = 'http://bob_is_not_a_domain/me.jpg?filter=make_me_pretty';
     const gradesUrl = 'http://gradesUrl/';
-    mountComponent({ student: { id: '27', name: 'Bob', avatarUrl, gradesUrl, isConcluded: false } });
-    const avatarBackground = avatarDiv().firstChild.style.getPropertyValue('background-image');
-    strictEqual(avatarBackground, `url("${avatarUrl}")`);
+    const props = { student: { id: '27', name: 'Bob', avatarUrl, gradesUrl, isConcluded: false } }
+
+    wrapper = shallow(<SubmissionTray {...defaultProps} {...props} />);
+    strictEqual(wrapper.find('Avatar').prop('src'), avatarUrl)
   });
 
   test('shows no avatar if avatar is null', function () {
@@ -261,7 +288,7 @@ QUnit.module('SubmissionTray', function (hooks) {
 
   test('shows name', function () {
     mountComponent({ student: { id: '27', name: 'Sara', gradesUrl: 'http://gradeUrl/', isConcluded: false } });
-    strictEqual(studentNameDiv().innerHTML, 'Sara');
+    strictEqual(studentNameDiv().innerText, 'Sara');
   });
 
   QUnit.module('LatePolicyGrade', function () {
@@ -473,7 +500,7 @@ QUnit.module('SubmissionTray', function (hooks) {
       isLastStudent: false
     });
 
-    strictEqual(wrapContent().find('#SubmissionTray__Content').find('Container').at(0).prop('padding'), '0 0 0 0');
+    strictEqual(wrapContent().find('#SubmissionTray__Content').find('View').at(0).prop('padding'), '0 0 0 0');
   });
 
   test('adds padding to the carousel container when no avatar is present', function () {
@@ -490,14 +517,16 @@ QUnit.module('SubmissionTray', function (hooks) {
       isLastStudent: false
     });
 
-    strictEqual(wrapContent().find('#SubmissionTray__Content').find('Container').at(0).prop('padding'), 'small 0 0 0');
+    strictEqual(wrapContent().find('#SubmissionTray__Content').find('View').at(0).prop('padding'), 'small 0 0 0');
   });
 
   QUnit.module('Grade Input', function () {
     test('receives the "assignment" given to the Tray', function () {
       const assignment = {
+        anonymizeStudents: false,
         gradingType: 'points',
         htmlUrl: 'http://htmlUrl/',
+        moderatedGrading: false,
         muted: false,
         name: 'Book Report',
         published: true
@@ -553,12 +582,88 @@ QUnit.module('SubmissionTray', function (hooks) {
       mountComponent({ gradingScheme });
       deepEqual(wrapContent().find('GradeInput').prop('gradingScheme'), gradingScheme);
     });
+
+    test('passes along isNotCountedForScore prop to SubmissionStatus', function () {
+      mountComponent()
+      const isNotCountedForScore = wrapContent().find('SubmissionStatus').at(0).prop('isNotCountedForScore')
+      deepEqual(isNotCountedForScore, wrapper.prop('isNotCountedForScore'))
+    });
+
+    test('receives the "pendingGradeInfo" given to the Tray', function() {
+      const pendingGradeInfo = {
+        excused: false,
+        grade: '10',
+        valid: true
+      };
+      mountComponent({ pendingGradeInfo });
+      equal(wrapContent().find('GradeInput').prop('pendingGradeInfo'), pendingGradeInfo);
+    });
   });
 
   test('renders the new comment form if the editedCommentId is null', function () {
     mountComponent();
     const form = wrapContent().find(SubmissionCommentCreateForm);
     strictEqual(form.length, 1);
+  });
+
+  test('renders new comment form if assignment is not muted', function () {
+    const assignment = {
+      anonymizeStudents: false,
+      gradingType: 'points',
+      htmlUrl: 'foo',
+      moderatedGrading: true,
+      muted: false,
+      name: 'foo',
+      published: false
+    };
+    mountComponent({assignment});
+    const form = wrapContent().find(SubmissionCommentCreateForm);
+    strictEqual(form.length, 1);
+  });
+
+  test('renders new comment form if assignment is muted and not anonymous or moderated', function () {
+    const assignment = {
+      anonymizeStudents: false,
+      gradingType: 'points',
+      htmlUrl: 'foo',
+      moderatedGrading: false,
+      muted: true,
+      name: 'foo',
+      published: false
+    };
+    mountComponent({assignment});
+    const form = wrapContent().find(SubmissionCommentCreateForm);
+    strictEqual(form.length, 1);
+  });
+
+  test('does not render new comment form if assignment has anonymized students', function () {
+    const assignment = {
+      anonymizeStudents: true,
+      gradingType: 'points',
+      htmlUrl: 'foo',
+      moderatedGrading: false,
+      muted: true,
+      name: 'foo',
+      published: false
+    };
+    mountComponent({assignment});
+    const form = wrapContent().find(SubmissionCommentCreateForm);
+    strictEqual(form.length, 0);
+  });
+
+  test('does not render new comment form if assignment is muted and moderated', function () {
+    const assignment = {
+      anonymizeStudents: false,
+      gradingType: 'points',
+      htmlUrl: 'foo',
+      moderatedGrading: true,
+      muted: true,
+      name: 'foo',
+      published: false
+    };
+    mountComponent({assignment});
+    const form = wrapContent().find(SubmissionCommentCreateForm);
+    strictEqual(form.length, 0);
   });
 
   test('does not render the new comment form if the editedCommentId is not null', function () {

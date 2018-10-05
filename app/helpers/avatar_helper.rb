@@ -67,14 +67,10 @@ module AvatarHelper
     link_opts[:style] += ";width: #{opts[:size]}px;height: #{opts[:size]}px" if opts[:size]
     link_opts[:href] = url if url
     link_opts[:title] = opts[:title] if opts[:title]
-    content = content_tag(
-      :span,
-      I18n.t('Click to change profile picture for %{display_name}', :display_name => display_name),
-      class: 'screenreader-only'
-    )
+    content = content_tag(:span, opts[:sr_content] || display_name, class: 'screenreader-only')
     content += (opts[:edit] ? content_tag(:i, nil, class: 'icon-edit') : '')
     content += (opts[:show_flag] ? content_tag(:i, nil, class: 'icon-flag') : '')
-    content_tag(:a, content, link_opts)
+    content_tag(url ? :a : :span, content, link_opts)
   end
 
   def avatar_url_for(conversation, participants = conversation.participants)
@@ -98,7 +94,7 @@ module AvatarHelper
     default_avatar = User.avatar_fallback_url(
         blank_fallback ? '/images/blank.png' : User.default_avatar_fallback,
         request)
-    url = if user.account.service_enabled?(:avatars)
+    url = if (@domain_root_account || user.account).service_enabled?(:avatars)
       user.avatar_url(nil,
                       (@domain_root_account && @domain_root_account.settings[:avatars] || 'enabled'),
                       default_avatar,
@@ -107,7 +103,7 @@ module AvatarHelper
       default_avatar
     end
 
-    if !url.match(%r{\Ahttps?://})
+    if !url.nil? && !url.match(%r{\Ahttps?://})
       # make sure that the url is not just a path
       url = "#{request.base_url}#{url}"
     end

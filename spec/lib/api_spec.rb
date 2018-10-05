@@ -113,6 +113,12 @@ describe Api do
       expect(Account.site_admin).to eq TestApiInstance.new(account, nil).api_find(Account, 'site_admin')
     end
 
+    it 'should find group_category with sis_id' do
+      account = Account.create!
+      gc = GroupCategory.create(sis_source_id: 'gc_sis', account: account, name: 'gc')
+      expect(gc).to eq TestApiInstance.new(account, nil).api_find(GroupCategory, 'sis_group_category_id:gc_sis')
+    end
+
     it 'should find term id "default"' do
       account = Account.create!
       expect(TestApiInstance.new(account, nil).api_find(account.enrollment_terms, 'default')).to eq account.default_enrollment_term
@@ -186,6 +192,13 @@ describe Api do
 
     it "should find user by uuid" do
       expect(@api.api_find(User, "uuid:#{@user.uuid}")).to eq @user
+    end
+
+    it "should find course by uuid" do
+      lti_course = course_factory
+      lti_course.uuid = Canvas::Security.hmac_sha1(lti_course.asset_string.to_s, 'key')
+      lti_course.save!
+      expect(@api.api_find(Course, "uuid:#{lti_course.uuid}")).to eq lti_course
     end
   end
 
@@ -609,6 +622,18 @@ describe Api do
       expect(Api.sis_parse_id("1", lookups)).to eq ["id", 1]
     end
 
+    it 'should correctly capture group_categories lookups' do
+      lookups = Api.sis_find_sis_mapping_for_collection(GroupCategory)[:lookups]
+      expect(Api.sis_parse_id("sis_group_category_id:1", lookups)).to eq ["sis_source_id", "1"]
+      expect(Api.sis_parse_id("sis_section_id:1", lookups)).to eq [nil, nil]
+      expect(Api.sis_parse_id("sis_course_id:1", lookups)).to eq [nil, nil]
+      expect(Api.sis_parse_id("sis_term_id:1", lookups)).to eq [nil, nil]
+      expect(Api.sis_parse_id("sis_user_id:1", lookups)).to eq [nil, nil]
+      expect(Api.sis_parse_id("sis_login_id:1", lookups)).to eq [nil, nil]
+      expect(Api.sis_parse_id("sis_account_id:1", lookups)).to eq [nil, nil]
+      expect(Api.sis_parse_id("1", lookups)).to eq ["id", 1]
+    end
+
     it 'should correctly query the course table' do
       sis_mapping = Api.sis_find_sis_mapping_for_collection(Course)
       expect(Api.relation_for_sis_mapping_and_columns(Course, {"sis_source_id" => ["1"], "id" => ["1"]}, sis_mapping, Account.default).to_sql).to match(/id IN \('1'\) OR \(root_account_id = #{Account.default.id} AND sis_source_id IN \('1'\)\)/)
@@ -723,6 +748,35 @@ describe Api do
         allow(@k).to receive(:mobile_device?).and_return(true)
         res = @k.api_user_content(@html, @course, @student)
         expect(res).to eq "<p>a</p><p>b</p>"
+      end
+    end
+
+    context "sharding" do
+      specs_require_sharding
+
+      it 'transposes ids in urls' do
+        @shard1.activate do
+          a = Account.create!
+          student_in_course(account: a)
+        end
+        html = <<-HTML
+<img src="/courses/34/files/2082/download?wrap=1" data-api-returntype="File" data-api-endpoint="https://canvas.vanity.edu/api/v1/courses/34/files/2082">
+<a href="/courses/34/pages/module-1" data-api-returntype="Page" data-api-endpoint="https://canvas.vanity.edu/api/v1/courses/34/pages/module-1">link</a>
+        HTML
+
+        @k = klass.new
+        @k.instance_variable_set(:@domain_root_account, Account.default)
+        @k.extend Rails.application.routes.url_helpers
+        @k.extend ActionDispatch::Routing::UrlFor
+        allow(@k).to receive(:request).and_return(nil)
+        allow(@k).to receive(:get_host_and_protocol_from_request).and_return(['school.instructure.com', 'https'])
+        allow(@k).to receive(:url_options).and_return({})
+
+        res = @k.api_user_content(html, @course, @student)
+        expect(res).to eq <<-HTML
+<img src="https://school.instructure.com/courses/#{@shard1.id}~34/files/#{@shard1.id}~2082/download?wrap=1" data-api-returntype="File" data-api-endpoint="https://school.instructure.com/api/v1/courses/#{@shard1.id}~34/files/#{@shard1.id}~2082">
+<a href="https://school.instructure.com/courses/#{@shard1.id}~34/pages/module-1" data-api-returntype="Page" data-api-endpoint="https://school.instructure.com/api/v1/courses/#{@shard1.id}~34/pages/module-1">link</a>
+        HTML
       end
     end
   end
@@ -925,6 +979,24 @@ describe Api do
         :next => 4,
       })
       expect(links.first).to eq "<www.example.com/?page=4&per_page=10>; rel=\"next\""
+    end
+
+    it "prevents link headers from consuming more than 6K of header space" do
+      links = Api.build_links("www.example.com/", {
+        :query_parameters => { :blah => 'a' * 2000 },
+        :per_page => 10,
+        :current => 8,
+        :next => 4,
+        :prev => 2,
+        :first => 1,
+        :last => 10,
+      })
+      expect(links.all?{ |l| l =~ /www.example.com\/\?/ }).to be_truthy
+      expect(links.find{ |l| l.match(/rel="current"/)}).to be_nil
+      expect(links.find{ |l| l.match(/rel="next"/)}).to match /page=4&per_page=10>/
+      expect(links.find{ |l| l.match(/rel="prev"/)}).to match /page=2&per_page=10>/
+      expect(links.find{ |l| l.match(/rel="first"/)}).to be_nil
+      expect(links.find{ |l| l.match(/rel="last"/)}).to match /page=10&per_page=10>/
     end
   end
 

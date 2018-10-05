@@ -60,10 +60,8 @@ describe "assignment rubrics" do
 
     it "should add a new rubric", priority: "2", test_id: 56587 do
       get "/courses/#{@course.id}/outcomes"
-      expect_new_page_load do
-        f('#popoverMenu button').click
-        f('[data-reactid*="manage-rubrics"]').click
-      end
+      expect_new_page_load{f(' .manage_rubrics').click}
+
       expect do
        f('.add_rubric_link').click
        f('#add_criterion_container a:nth-of-type(1)').click
@@ -80,7 +78,7 @@ describe "assignment rubrics" do
        submit_form('#edit_rubric_form')
        wait_for_ajaximations
       end.to change(Rubric, :count).by(1)
-      expect(f('.rubric_table tbody tr:nth-of-type(3) .criterion_description_value')).
+      expect(f('.rubric_table tbody tr:nth-of-type(3) .description_title')).
                                 to include_text('criterion 1')
       expect(f('.rubric_table tbody tr:nth-of-type(3) .ratings td:nth-of-type(2) .rating_description_value')).
           to include_text('rating 1')
@@ -203,8 +201,6 @@ describe "assignment rubrics" do
       wait_for_ajaximations
       # click on the Import button
       f('.ui-dialog .btn-primary').click
-      # confirm the import
-      driver.switch_to.alert.accept
       wait_for_ajaximations
       # pts should not be editable
       expect(f('#rubric_new .learning_outcome_criterion .points_form .editing').displayed?).to be_falsey
@@ -284,8 +280,8 @@ describe "assignment rubrics" do
 
       f(".toggle_full_rubric").click
       wait_for_ajaximations
-      expect(f('#criterion_1 .long_description')).
-        to include_text "<b>This text should not be bold</b>"
+      f(".criterion_description .long_description_link").click
+      expect(f(".ui-dialog div.long_description").text).to eq "<b>This text should not be bold</b>"
     end
 
     it "should follow learning outcome ignore_for_scoring", priority: "2", test_id: 220328 do
@@ -542,6 +538,61 @@ describe "assignment rubrics" do
       end
     end
 
+    context "non-scoring rubrics" do
+      before(:each) do
+        @course.account.root_account.enable_feature!(:non_scoring_rubrics)
+        @assignment = @course.assignments.create(name: 'NSR assignment')
+        outcome_with_rubric
+        @rubric.associate_with(@assignment, @course, purpose: 'grading')
+      end
+
+      it "should create and edit a non-scoring rubric" do
+        get "/courses/#{@course.id}/assignments/#{@assignment.id}"
+
+        f(' .rubric_title .icon-edit').click
+        wait_for_ajaximations
+
+        # Hide points on rubric
+        f('#hide_points').click
+        wait_for_ajaximations
+        rating_points_elements = ff('.points')
+        rating_points_elements.each do |points|
+          expect(points).not_to be_displayed
+        end
+        total_points_elements = ff('[class="total_points_holder toggle_for_hide_points "]')
+        total_points_elements.each do |total_points|
+          expect(total_points).not_to be_displayed
+        end
+
+        # Add rating
+        ff('.add_rating_link_after')[4].click
+        expect(fj('span:contains("Edit Rating")')).to be_present
+        rating_score_fields = ff('#rating_form_score_label')
+        rating_score_fields.each do |rating_score_field|
+          expect(rating_score_field).not_to be_displayed
+        end
+        wait_for_ajaximations
+        set_value(ff('#rating_form_title')[0], 'Test rating 1')
+        set_value(ff('#rating_form_description')[0], 'Test description 1')
+        fj('span:contains("Update Rating")').click
+        wait_for_ajaximations
+
+        expect(ff('[class="description rating_description_value"]')[11].text).to eq "Test rating 1"
+        expect(ff('[class="rating_long_description small_description"]')[11].text).to eq "Test description 1"
+
+        # Save rubric
+        find_button("Update Rubric").click
+        wait_for_ajaximations
+
+        expect(ff('[class="description rating_description_value"]')[6].text).to eq "Test rating 1"
+        expect(ff('[class="rating_long_description small_description"]')[6].text).to eq "Test description 1"
+        rating_points_elements = ff('.points')
+        rating_points_elements.each do |points|
+          expect(points).not_to be_displayed
+        end
+      end
+    end
+
     context "criterion copy" do
       before(:each) do
         @course.account.root_account.enable_feature!(:rubric_criterion_range)
@@ -563,7 +614,7 @@ describe "assignment rubrics" do
 
         wait_for_ajaximations
 
-        expect(ffj('.criterion:visible .criterion_description_value')[2]).to include_text "no outcome row"
+        expect(ffj('.criterion:visible .description_title')[2]).to include_text "no outcome row"
       end
 
       it "should copy an existing learning outcome", priority: "1", test_id: 220343 do
@@ -576,7 +627,7 @@ describe "assignment rubrics" do
         f('#criterion_duplicate_menu ul li:nth-of-type(1)').click
         wait_for_ajaximations
 
-        expect(ffj('.criterion:visible .criterion_description_value')[2]).to include_text "Outcome row"
+        expect(ffj('.criterion:visible .description_title')[2]).to include_text "Outcome row"
       end
     end
   end

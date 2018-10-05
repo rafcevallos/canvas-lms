@@ -23,10 +23,10 @@ import ThemeEditorFileUpload from 'jsx/theme_editor/ThemeEditorFileUpload'
 let elem, props
 
 QUnit.module('ThemeEditorFileUpload Component', {
-  setup () {
+  setup() {
     elem = document.createElement('div')
     props = {
-      onChange: this.spy()
+      onChange: sinon.spy()
     }
   }
 })
@@ -86,11 +86,11 @@ test('hasUserInput', () => {
   ok(component.hasUserInput(), 'non null input value')
 })
 
-test('handleFileChanged', function () {
+test('handleFileChanged', function() {
   var expected = {}
-  this.stub(window.URL, 'createObjectURL').returns(expected)
+  sandbox.stub(window.URL, 'createObjectURL').returns(expected)
   const component = ReactDOM.render(<ThemeEditorFileUpload {...props} />, elem)
-  this.spy(component, 'setState')
+  sandbox.spy(component, 'setState')
   const file = new Blob(['foo'], {type: 'text/plain'})
   file.name = 'foo.png'
   component.handleFileChanged({target: {files: [file]}})
@@ -98,22 +98,19 @@ test('handleFileChanged', function () {
     component.setState.calledWithMatch({selectedFileName: file.name}),
     'sets selectedFileName in state'
   )
-  ok(
-    window.URL.createObjectURL.calledWith(file),
-    'creates object url with file'
-  )
+  ok(window.URL.createObjectURL.calledWith(file), 'creates object url with file')
   ok(props.onChange.calledWith(expected), 'calls onChange with object url')
 })
 
-test('handleResetClicked', function () {
+test('handleResetClicked', function() {
   const component = ReactDOM.render(<ThemeEditorFileUpload {...props} />, elem)
-  const subject = component.refs.fileInput.getDOMNode()
+  const subject = component.fileInput
   subject.setAttribute('type', 'text')
   subject.value = 'foo'
-  this.spy(component, 'setState')
+  sandbox.spy(component, 'setState')
   const file = new Blob(['foo'], {type: 'text/plain'})
   file.name = 'foo.png'
-  this.stub(component, 'hasUserInput').returns(true)
+  sandbox.stub(component, 'hasUserInput').returns(true)
   component.handleResetClicked()
   equal(subject.value, '', 'cleared file input value')
   ok(
@@ -127,14 +124,10 @@ test('handleResetClicked', function () {
   ok(props.onChange.calledWith(''), 'calls onChange empty string')
 })
 
-test('displayValue', function () {
+test('displayValue', function() {
   let component = ReactDOM.render(<ThemeEditorFileUpload {...props} />, elem)
-  this.stub(component, 'hasUserInput').returns(false)
-  equal(
-    component.displayValue(),
-    '',
-    'no input or current value, returns empty string'
-  )
+  sandbox.stub(component, 'hasUserInput').returns(false)
+  equal(component.displayValue(), '', 'no input or current value, returns empty string')
 
   props.userInput = {val: 'foo'}
   component = ReactDOM.render(<ThemeEditorFileUpload {...props} />, elem)
@@ -148,16 +141,12 @@ test('displayValue', function () {
 
   props.currentValue = 'bar'
   component = ReactDOM.render(<ThemeEditorFileUpload {...props} />, elem)
-  equal(
-    component.displayValue(),
-    props.currentValue,
-    'returns current value'
-  )
+  equal(component.displayValue(), props.currentValue, 'returns current value')
 })
 
 test('sets accept on file input from prop', () => {
   props.accept = 'image/*'
   const component = ReactDOM.render(<ThemeEditorFileUpload {...props} />, elem)
-  const subject = component.refs.fileInput.getDOMNode()
+  const subject = component.fileInput
   equal(subject.accept, props.accept, 'accepted is set on file input')
 })

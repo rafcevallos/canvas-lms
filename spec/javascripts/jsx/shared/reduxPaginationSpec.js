@@ -32,7 +32,7 @@ QUnit.module('createPaginationActions')
 
 test('creates proper actionTypes', () => {
   const { actionTypes } = createPaginationActions('things')
-  deepEqual(actionTypes, ['SELECT_THINGS_PAGE',  'GET_THINGS_START', 'GET_THINGS_SUCCESS', 'GET_THINGS_FAIL'])
+  deepEqual(actionTypes, ['SELECT_THINGS_PAGE',  'GET_THINGS_START', 'GET_THINGS_SUCCESS', 'GET_THINGS_FAIL', 'CLEAR_THINGS_PAGE'])
 })
 
 test('creates get action creator', () => {
@@ -199,6 +199,45 @@ test('creates get action creator from thunk that selects the page if select is t
   })
 })
 
+test('can get all pagination results under a single set of dispatches', (assert) => {
+  const done = assert.async()
+  const mockStore = createMockStore({
+    things: {
+      currentPage: 1,
+      pages: { 1: { item: [], loadState: LoadStates.NOT_LOADED } }
+    },
+  })
+  const dispatchSpy = sinon.spy(mockStore, 'dispatch')
+
+  const mockResult = {
+    data: ['item1'],
+    headers: {
+      link: '<http://canvas.example.com/api/v1/someendpoint&page=5&per_page=50>; rel="last"'
+    }
+  }
+  const thunk = () => new Promise((resolve, _reject) => resolve(mockResult))
+  const { actionCreators } = createPaginationActions('things', thunk, {totalCount: 250, fetchAll: true })
+  actionCreators.getThings()(mockStore.dispatch, mockStore.getState)
+  setTimeout(() => {
+    equal(dispatchSpy.callCount, 2)
+    deepEqual(dispatchSpy.firstCall.args, [{ type: 'GET_THINGS_START', payload: { page: 1 } }])
+
+    // Should have item1 5 times, as the link header indicated there were 5
+    // pages that needed to be gathered
+    const expectedResults = {
+      type: 'GET_THINGS_SUCCESS',
+      payload: {
+        data: [ "item1", "item1", "item1", "item1", "item1" ],
+        lastPage: 1,
+        page: 1
+      }
+    }
+    deepEqual(dispatchSpy.secondCall.args, [expectedResults])
+    dispatchSpy.restore()
+    done()
+  }, 750)
+})
+
 QUnit.module('createPaginatedReducer')
 
 test('sets current page on SELECT_PAGE', () => {
@@ -249,6 +288,48 @@ test('sets items for page on GET_SUCCESS', () => {
   deepEqual(newState.pages[1].items, ['item1'])
 })
 
+test('resets items for page on CLEAR_PAGE', () => {
+  const state = {
+    currentPage: 1,
+    pages: {
+      1: {
+        items: [{ id: 1, title: 'some title' }],
+        loadState: LoadStates.LOADED,
+      },
+    },
+  }
+  const reduce = createPaginatedReducer('things')
+  const action = { type: 'CLEAR_THINGS_PAGE', payload: { page: 1 } }
+  const newState = reduce(state, action)
+  deepEqual(newState.pages[1].items, [])
+})
+
+test('resets items for multiple pages on CLEAR_PAGE', () => {
+  const state = {
+    currentPage: 1,
+    pages: {
+      1: {
+        items: [{ id: 1, title: 'some title' }],
+        loadState: LoadStates.LOADED,
+      },
+      2: {
+        items: [{ id: 1, title: 'some title' }],
+        loadState: LoadStates.LOADED,
+      },
+      3: {
+        items: [{ id: 1, title: 'some title' }],
+        loadState: LoadStates.LOADED,
+      },
+    },
+  }
+  const reduce = createPaginatedReducer('things')
+  const action = { type: 'CLEAR_THINGS_PAGE', payload: { pages: [2, 3] } }
+  const newState = reduce(state, action)
+  deepEqual(newState.pages[1].items, [{ id: 1, title: 'some title' }])
+  deepEqual(newState.pages[2].items, [])
+  deepEqual(newState.pages[3].items, [])
+})
+
 test('sets loadState for page to LOADING on GET_START', () => {
   const state = {
     currentPage: 1,
@@ -295,6 +376,48 @@ test('sets loadState for page to ERRORED on GET_FAIL', () => {
   const action = { type: 'GET_THINGS_FAIL', payload: { page: 1, message: 'oops error' } }
   const newState = reduce(state, action)
   equal(newState.pages[1].loadState, LoadStates.ERRORED)
+})
+
+test('sets loadState for page to NOT_LOADED on CLEAR_PAGE', () => {
+  const state = {
+    currentPage: 1,
+    pages: {
+      1: {
+        items: [],
+        loadState: LoadStates.LOADED,
+      },
+    },
+  }
+  const reduce = createPaginatedReducer('things')
+  const action = { type: 'CLEAR_THINGS_PAGE', payload: { page: 1 } }
+  const newState = reduce(state, action)
+  equal(newState.pages[1].loadState, LoadStates.NOT_LOADED)
+})
+
+test('sets loadState for multiple pages to NOT_LOADED on CLEAR_PAGE', () => {
+  const state = {
+    currentPage: 1,
+    pages: {
+      1: {
+        items: [],
+        loadState: LoadStates.LOADED,
+      },
+      2: {
+        items: [],
+        loadState: LoadStates.LOADED,
+      },
+      3: {
+        items: [],
+        loadState: LoadStates.LOADED,
+      },
+    },
+  }
+  const reduce = createPaginatedReducer('things')
+  const action = { type: 'CLEAR_THINGS_PAGE', payload: { pages: [2, 3] } }
+  const newState = reduce(state, action)
+  equal(newState.pages[1].loadState, LoadStates.LOADED)
+  equal(newState.pages[2].loadState, LoadStates.NOT_LOADED)
+  equal(newState.pages[3].loadState, LoadStates.NOT_LOADED)
 })
 
 QUnit.module('selectPaginationState')

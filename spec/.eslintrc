@@ -7,6 +7,7 @@
     "test": true,
     "equal": true,
     "ok": true,
+    "sandbox": true,
     "sinon": true,
     "deepEqual": true
   },
@@ -21,6 +22,7 @@
     "func-names": "off",
     "prefer-arrow-callback": "off",
     "jest/no-identical-title": "off",
+    "qunit/no-setup-teardown": "off",
     "qunit/no-global-assertions": "off",
     "qunit/no-global-module-test": "off",
     "qunit/require-expect": "off",

@@ -78,7 +78,7 @@ module BroadcastPolicies
       !course.concluded? &&
       !assignment.muted? &&
       assignment.published? &&
-      submission.quiz_submission.nil? &&
+      submission.quiz_submission_id.nil? &&
       user_active_or_invited?
     end
 
@@ -95,12 +95,12 @@ module BroadcastPolicies
     end
 
     def just_submitted_late?
-      (just_submitted? || submission.submitted_at_changed?)
+      (just_submitted? || submission.saved_change_to_submitted_at?)
     end
 
     def is_a_resubmission?
-      submission.submitted_at_was &&
-      submission.submitted_at_changed?
+      submission.submitted_at_before_last_save &&
+      submission.saved_change_to_submitted_at?
     end
 
     def grade_updated?

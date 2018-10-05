@@ -35,6 +35,7 @@ class Quizzes::QuizStatistics < ActiveRecord::Base
 
   after_initialize do
     self.includes_all_versions ||= false
+    self.includes_sis_ids ||= false
   end
 
   # Test a given quiz if it's within the sanity limits for generating stats.
@@ -59,20 +60,17 @@ class Quizzes::QuizStatistics < ActiveRecord::Base
   # Generates or returns the previously generated CSV version of this report.
   def generate_csv
     self.csv_attachment ||= begin
-      options = {}
-      options[:filename] = "quiz_#{report_type}_report.csv"
-      options[:uploaded_data] = StringIO.new(report.to_csv)
-      options[:display_name] = t('#quizzes.quiz_statistics.statistics_filename',
-        "%{quiz_title} %{quiz_type} %{report_type} Report", {
-          quiz_title: quiz.title,
-          quiz_type: quiz.readable_type,
-          report_type: readable_type
-        }) + ".csv"
-
-      build_csv_attachment(options).tap do |attachment|
-        attachment.content_type = 'text/csv'
-        attachment.save!
-      end
+      attachment = build_csv_attachment(
+        content_type: 'text/csv',
+        filename: "quiz_#{report_type}_report.csv",
+        display_name: t("%{quiz_title} %{quiz_type} %{report_type} Report", {
+            quiz_title: quiz.title,
+            quiz_type: quiz.readable_type,
+            report_type: readable_type
+          }) + ".csv")
+      Attachments::Storage.store_for_attachment(attachment, StringIO.new(report.to_csv))
+      attachment.save!
+      attachment
     end
   end
 
@@ -146,7 +144,10 @@ class Quizzes::QuizStatistics < ActiveRecord::Base
   end
 
   set_policy do
-    given { |user, session| quiz.grants_right?(user, session, :read_statistics) }
+    given do |user, session|
+      quiz.grants_right?(user, session, :read_statistics) &&
+        (!includes_sis_ids || quiz.context.grants_any_right?(user, session, :read_sis, :manage_sis))
+    end
     can :read
   end
 end

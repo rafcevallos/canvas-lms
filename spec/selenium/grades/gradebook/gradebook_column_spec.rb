@@ -85,11 +85,11 @@ describe "assignment column headers" do
     }
     @user.save!
     @fourth_assignment = assignment_model({
-      :course => @course,
-      :name => "new assignment",
-      :due_at => nil,
-      :points_possible => 150,
-      :assignment_group => nil,
+      course: @course,
+      name: "new assignment",
+      due_at: nil,
+      points_possible: 150,
+      assignment_group: nil,
       })
     @fourth_assignment.grade_student(@student_1, grade: 150, grader: @teacher)
 
@@ -132,7 +132,7 @@ describe "assignment column headers" do
   it "should show letter grade in total column", priority: "1", test_id: 220035 do
     get "/courses/#{@course.id}/gradebook"
     expect(f('#gradebook_grid .container_1 .slick-row:nth-child(1) .total-cell .letter-grade-points')).to include_text("A")
-    edit_grade('#gradebook_grid .slick-row:nth-child(2) .l2', '50')
+    edit_grade('#gradebook_grid .slick-row:nth-child(2) .b2', '50')
     expect(f('#gradebook_grid .container_1 .slick-row:nth-child(2) .total-cell .letter-grade-points')).to include_text("A")
   end
 end

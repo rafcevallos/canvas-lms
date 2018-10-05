@@ -244,10 +244,20 @@ module ApplicationHelper
     Rails.env.test? && ENV.fetch("DISABLE_CSS_TRANSITIONS", "1") == "1"
   end
 
+  def use_rtl?
+    @current_user.try(:feature_enabled?, :force_rtl) || (@domain_root_account.try(:feature_enabled?, :allow_rtl) && I18n.rtl?)
+  end
+
+  # this is exactly the same as our sass helper with the same name
+  # see: https://www.npmjs.com/package/sass-direction
+  def direction(left_or_right)
+    use_rtl? ? {'left' => 'right', 'right' => 'left'}[left_or_right] : left_or_right
+  end
+
   def css_variant(opts = {})
     variant = use_responsive_layout? ? 'responsive_layout' : 'new_styles'
     use_high_contrast = @current_user && @current_user.prefers_high_contrast? || opts[:force_high_contrast]
-    variant + (use_high_contrast ? '_high_contrast' : '_normal_contrast')
+    variant + (use_high_contrast ? '_high_contrast' : '_normal_contrast') + (use_rtl? ? '_rtl' : '')
   end
 
   def css_url_for(bundle_name, plugin=false, opts = {})
@@ -259,6 +269,17 @@ module ApplicationHelper
 
   def brand_variable(variable_name)
     BrandableCSS.brand_variable_value(variable_name, active_brand_config)
+  end
+
+  # returns the proper alt text for the logo
+  def alt_text_for_login_logo
+    possibly_customized_login_logo = brand_variable('ic-brand-Login-logo')
+    default_login_logo = BrandableCSS.brand_variable_value('ic-brand-Login-logo')
+    if possibly_customized_login_logo == default_login_logo
+      I18n.t("Canvas by Instructure")
+    else
+      @domain_root_account.short_name
+    end
   end
 
   def favicon
@@ -428,9 +449,7 @@ module ApplicationHelper
       :http_status              => @status,
       :error_id                 => @error && @error.id,
       :disableGooglePreviews    => !service_enabled?(:google_docs_previews),
-      :disableScribdPreviews    => !feature_enabled?(:scribd),
       :disableCrocodocPreviews  => !feature_enabled?(:crocodoc),
-      :enableScribdHtml5        => feature_enabled?(:scribd_html5),
       :logPageViews             => !@body_class_no_headers,
       :maxVisibleEditorButtons  => 3,
       :editorButtons            => editor_buttons,
@@ -544,14 +563,32 @@ module ApplicationHelper
   end
 
   def map_courses_for_menu(courses, opts={})
+    precalculated_tab_permissions = opts[:include_section_tabs] && @current_user &&
+      Rails.cache.fetch(['precalculated_permissions_for_menu', @current_user, collection_cache_key(courses)]) do
+        @current_user.precalculate_permissions_for_courses(courses, SectionTabHelper::PERMISSIONS_TO_PRECALCULATE)
+      end
     mapped = courses.map do |course|
-      tabs = opts[:include_section_tabs] && available_section_tabs(course)
+      tabs = opts[:include_section_tabs] && available_section_tabs(course, precalculated_tab_permissions&.dig(course.global_id))
       presenter = CourseForMenuPresenter.new(course, tabs, @current_user, @domain_root_account)
       presenter.to_h
     end
 
     if @domain_root_account.feature_enabled?(:dashcard_reordering)
       mapped = mapped.sort_by {|h| h[:position] || ::CanvasSort::Last}
+    end
+
+    mapped
+  end
+
+  # return enough group data for the planner to display items associated with groups
+  def map_groups_for_planner(groups)
+    mapped = groups.map do |g|
+      {
+        id: g.id,
+        assetString: g.asset_string,
+        name: g.name,
+        url: "/groups/#{g.id}"
+      }
     end
 
     mapped
@@ -866,10 +903,9 @@ module ApplicationHelper
   end
 
   def link_to_parent_signup(auth_type)
-    template = auth_type.present? ? "#{auth_type.downcase}Dialog" : "parentDialog"
-    path = auth_type.present? ? external_auth_validation_path : users_path
+    data = reg_link_data(auth_type)
     link_to(t("Parents sign up here"), '#', id: "signup_parent", class: "signup_link",
-            data: {template: template, path: path}, title: t("Parent Signup"))
+            data: data, title: t("Parent Signup"))
   end
 
   def tutorials_enabled?
@@ -888,13 +924,108 @@ module ApplicationHelper
   end
 
   def planner_enabled?
-    @domain_root_account&.feature_enabled?(:student_planner) && @current_user.has_student_enrollment?
+    !!(@current_user && @domain_root_account&.feature_enabled?(:student_planner) &&
+      @current_user.has_student_enrollment?)
   end
 
-  def thumbnail_image_url(attachment)
+  def generate_access_verifier
+    Users::AccessVerifier.generate(
+      user: @current_user,
+      real_user: logged_in_user,
+      developer_key: @access_token&.developer_key,
+      root_account: @domain_root_account,
+      oauth_host: request.host_with_port
+    )
+  end
+
+  def validate_access_verifier
+    Users::AccessVerifier.validate(params)
+  end
+
+  def file_access_user
+    if !@files_domain
+      @current_user
+    elsif session['file_access_user_id'].present?
+      @file_access_user ||= User.where(id: session['file_access_user_id']).first
+    else
+      nil
+    end
+  end
+
+  def file_access_real_user
+    if !@files_domain
+      logged_in_user
+    elsif session['file_access_real_user_id'].present?
+      @file_access_real_user ||= User.where(id: session['file_access_real_user_id']).first
+    else
+      file_access_user
+    end
+  end
+
+  def file_access_developer_key
+    if !@files_domain
+      @access_token&.developer_key
+    elsif session['file_access_developer_key_id'].present?
+      @file_access_developer_key ||= DeveloperKey.where(id: session['file_access_developer_key_id']).first
+    else
+      nil
+    end
+  end
+
+  def file_access_root_account
+    if !@files_domain
+      @domain_root_account
+    elsif session['file_access_root_account_id'].present?
+      @file_access_root_account ||= Account.where(id: session['file_access_root_account_id']).first
+    else
+      nil
+    end
+  end
+
+  def file_access_oauth_host
+    if logged_in_user && !@files_domain
+      request.host_with_port
+    elsif session['file_access_oauth_host'].present?
+      session['file_access_oauth_host']
+    else
+      nil
+    end
+  end
+
+  def file_authenticator
+    FileAuthenticator.new(
+      user: file_access_real_user,
+      acting_as: file_access_user,
+      access_token: @access_token,
+      # TODO: we prefer the access token when we have it, and we'll _need_ to
+      # before we can implement the long term API access solution (which means
+      # we'll need to stop going through the files domain). but if we don't
+      # have it (we're on the files domain, and can't safely get at the token
+      # itself, but can get the developer key id), we can use the developer key
+      # to "fake" an access token it for the short term work around (which only
+      # ends up looking at the developer key anyways)
+      developer_key: file_access_developer_key,
+      root_account: file_access_root_account,
+      oauth_host: file_access_oauth_host
+    )
+  end
+
+  def authenticated_download_url(attachment)
+    file_authenticator.download_url(attachment)
+  end
+
+  def authenticated_inline_url(attachment)
+    file_authenticator.inline_url(attachment)
+  end
+
+  def authenticated_thumbnail_url(attachment, options={})
+    file_authenticator.thumbnail_url(attachment, options)
+  end
+
+  def thumbnail_image_url(attachment, uuid=nil, url_options={})
     # this thumbnail url is a route that redirects to local/s3 appropriately.
     # deferred redirect through route because it may be saved for later use
     # after a direct link to attachment.thumbnail_url would have expired
-    super(attachment, attachment.uuid)
+    super(attachment, uuid || attachment.uuid, url_options)
   end
 end

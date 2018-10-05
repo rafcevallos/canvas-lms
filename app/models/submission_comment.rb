@@ -20,7 +20,9 @@ class SubmissionComment < ActiveRecord::Base
   include SendToStream
   include HtmlTextHelper
 
-  belongs_to :submission #, :touch => true
+  alias_attribute :body, :comment
+
+  belongs_to :submission
   belongs_to :author, :class_name => 'User'
   belongs_to :assessment_request
   belongs_to :context, polymorphic: [:course]
@@ -42,18 +44,21 @@ class SubmissionComment < ActiveRecord::Base
 
   scope :visible, -> { where(:hidden => false) }
   scope :draft, -> { where(draft: true) }
-  scope :published, -> { where("submission_comments.draft IS NOT TRUE") }
+  scope :published, -> { where(draft: false) }
   scope :after, lambda { |date| where("submission_comments.created_at>?", date) }
   scope :for_final_grade, -> { where(:provisional_grade_id => nil) }
   scope :for_provisional_grade, ->(id) { where(:provisional_grade_id => id) }
+  scope :for_provisional_grades, -> { where.not(provisional_grade_id: nil) }
   scope :for_assignment_id, lambda { |assignment_id| where(:submissions => { :assignment_id => assignment_id }).joins(:submission) }
+  scope :for_groups, -> { where.not(group_comment_id: nil) }
+  scope :not_for_groups, -> { where(group_comment_id: nil) }
 
   def delete_other_comments_in_this_group
-    update_other_comments_in_this_group &:destroy
+    update_other_comments_in_this_group(&:destroy)
   end
 
   def publish_other_comments_in_this_group
-    return unless draft_changed?
+    return unless saved_change_to_draft?
     update_other_comments_in_this_group do |comment|
       comment.update_attributes(draft: draft)
     end
@@ -88,7 +93,7 @@ class SubmissionComment < ActiveRecord::Base
   end
 
   def check_for_media_object
-    if self.media_comment? && self.media_comment_id_changed?
+    if self.media_comment? && self.saved_change_to_media_comment_id?
       MediaObject.ensure_media_object(self.media_comment_id, {
         :user => self.author,
         :context => self.author,
@@ -127,11 +132,20 @@ class SubmissionComment < ActiveRecord::Base
 
   set_broadcast_policy do |p|
     p.dispatch :submission_comment
-    p.to { ([submission.user] + User.observing_students_in_course(submission.user, submission.assignment.context)) - [author] }
+    p.to do
+      course_id = /\d+/.match(submission.context_code).to_s.to_i
+      section_ended =
+        Enrollment.where({
+                           user_id: submission.user.id
+                         }).section_ended(course_id).length > 0
+      unless section_ended
+        ([submission.user] + User.observing_students_in_course(submission.user, submission.assignment.context)) - [author]
+      end
+    end
     p.whenever {|record|
       # allows broadcasting when this record is initially saved (assuming draft == false) and also when it gets updated
       # from draft to final
-      (!record.draft? && (record.just_created || record.draft_changed?)) &&
+      (!record.draft? && (record.just_created || record.saved_change_to_draft?)) &&
       record.provisional_grade_id.nil? &&
       record.submission.assignment &&
       record.submission.assignment.context.available? &&
@@ -143,7 +157,7 @@ class SubmissionComment < ActiveRecord::Base
     p.dispatch :submission_comment_for_teacher
     p.to { submission.assignment.context.instructors_in_charge_of(author_id) - [author] }
     p.whenever {|record|
-      (!record.draft? && (record.just_created || record.draft_changed?)) &&
+      (!record.draft? && (record.just_created || record.saved_change_to_draft?)) &&
       record.provisional_grade_id.nil? &&
       record.submission.user_id == record.author_id
     }
@@ -160,7 +174,7 @@ class SubmissionComment < ActiveRecord::Base
     raise IncomingMail::Errors::UnknownAddress if self.context.root_account.deleted?
     user = opts[:user]
     message = opts[:text].strip
-    user = nil unless user && self.context.users.include?(user)
+    user = nil unless user && self.submission.grants_right?(user, :comment)
     if !user
       raise "Only comment participants may reply to messages"
     elsif !message || message.empty?
@@ -261,9 +275,13 @@ class SubmissionComment < ActiveRecord::Base
     methods
   end
 
+  def publishable_for?(user)
+    draft? && author_id == user.id
+  end
+
   def update_participation
     # id_changed? because new_record? is false in after_save callbacks
-    if id_changed? || (hidden_changed? && !hidden?)
+    if saved_change_to_id? || (saved_change_to_hidden? && !hidden?)
       return if submission.user_id == author_id
       return if submission.assignment.deleted? || submission.assignment.muted?
       return if provisional_grade_id.present?

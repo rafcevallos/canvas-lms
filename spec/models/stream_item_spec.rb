@@ -76,6 +76,8 @@ describe StreamItem do
       si1 = StreamItem.create! { |si| si.asset_type = 'Message'; si.data = { notification_id: nil } }
       si2 = StreamItem.create! { |si| si.asset_type = 'Message'; si.data = { notification_id: nil } }
       StreamItem.where(:id => si2).update_all(:updated_at => 1.year.ago)
+      # stub this out so that the vacuum is skipped (can't run in specs in a transaction)
+      allow(Shard.current.database_server).to receive(:unshackle)
       expect {
         StreamItem.destroy_stream_items_using_setting
       }.to change(StreamItem, :count).by(-1)
@@ -140,4 +142,25 @@ describe StreamItem do
       end
     end
   end
+
+  it "should return a title for a Conversation" do
+    user_factory
+    convo = Conversation.create!(:subject => "meow")
+    convo.generate_stream_items([@user])
+    si = @user.stream_item_instances.first.stream_item
+    data = si.data(@user.id)
+    expect(data).to be_a Conversation
+    expect(data.title).to eql("meow")
+  end
+
+    it "should return a description for a Collaboration" do
+      user_factory
+      context = Course.create!
+      collab = Collaboration.create!(:context => context, :description => "meow", :title => "kitty")
+      collab.generate_stream_items([@user])
+      si = @user.stream_item_instances.first.stream_item
+      data = si.data(@user.id)
+      expect(data).to be_a Collaboration
+      expect(data.description).to eql("meow")
+    end
 end

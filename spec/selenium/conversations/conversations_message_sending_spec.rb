@@ -42,6 +42,7 @@ describe "conversations new" do
     end
 
     it "should start a group conversation when there is only one recipient", priority: "2", test_id: 201499 do
+      skip_if_chrome('fragile in chrome')
       conversations
       compose course: @course, to: [@s1], subject: 'single recipient', body: 'hallo!'
       c = @s1.conversations.last.conversation
@@ -50,6 +51,7 @@ describe "conversations new" do
     end
 
     it "should start a group conversation when there is more than one recipient", priority: "2", test_id: 201500 do
+      skip_if_chrome('fragile in chrome')
       conversations
       compose course: @course, to: [@s1, @s2], subject: 'multiple recipients', body: 'hallo!'
       c = @s1.conversations.last.conversation
@@ -128,24 +130,15 @@ describe "conversations new" do
       user = account_admin_user
       user_logged_in({:user => user})
 
-      # TODO: delete these lines when we remove the :course_user_search feature flag
       get "/accounts/#{Account.default.id}/users"
       wait_for_ajaximations
-      f('li.user a').click
-      wait_for_ajaximations
-      f('.icon-email').click
-      wait_for_ajaximations
-      expect(f('.ac-token')).not_to be_nil
-      Account.default.enable_feature!(:course_user_search)
-
-      get "/accounts/#{Account.default.id}/users"
-      wait_for_ajaximations
-      fj('.users-list [role=row] a:has([name="IconMessageLine"])').click
+      fj('[data-automation="users list"] tr a:has([name="IconMessage"])').click
       wait_for_ajaximations
       expect(f('.ac-token')).not_to be_nil
     end
 
     it "should allow selecting multiple recipients in one search", priority: "2", test_id: 201941 do
+      skip_if_chrome('fragile in chrome')
       conversations
       fj('#compose-btn').click
       wait_for_ajaximations
@@ -159,6 +152,7 @@ describe "conversations new" do
     end
 
     it "should not send the message on shift-enter", priority: "1", test_id: 206019 do
+      skip_if_chrome('fragile in chrome')
       conversations
       compose course: @course, to: [@s1], subject: 'context-free', body: 'hallo!', send: false
       driver.action.key_down(:shift).perform
@@ -215,6 +209,7 @@ describe "conversations new" do
       end
 
       it "should check and lock the bulk_message checkbox when over the max size", priority: "2", test_id: 206022 do
+        skip('COMMS-1164')
         conversations
         compose course: @course, subject: 'lockme', body: 'hallo!', send: false
 
@@ -237,6 +232,7 @@ describe "conversations new" do
       end
 
       it "should leave the value the same as before after unlocking", priority: "2", test_id: 206023 do
+        skip_if_chrome('fragile in chrome')
         conversations
         compose course: @course, subject: 'lockme', body: 'hallo!', send: false
 

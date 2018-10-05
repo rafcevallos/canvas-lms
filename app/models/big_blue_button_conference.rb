@@ -49,17 +49,24 @@ class BigBlueButtonConference < WebConference
     send_request(:create, {
       :meetingID => conference_key,
       :name => title,
-      :voiceBridge => "%020d" % self.global_id,
+      :voiceBridge => format("%020d", self.global_id),
       :attendeePW => settings[:user_key],
       :moderatorPW => settings[:admin_key],
       :logoutURL => (settings[:default_return_url] || "http://www.instructure.com"),
       :record => settings[:record] ? "true" : "false",
       :welcome => settings[:record] ? t("This conference may be recorded.") : "",
+      "meta_canvas-recording-ready-user" => recording_ready_user,
       "meta_canvas-recording-ready-url" => recording_ready_url(current_host)
     }) or return nil
     @conference_active = true
     save
     conference_key
+  end
+
+  def recording_ready_user
+    if self.grants_right?(self.user, :create)
+      "#{self.user['name']} <#{self.user.email}>"
+    end
   end
 
   def recording_ready_url(current_host = nil)
@@ -77,23 +84,43 @@ class BigBlueButtonConference < WebConference
     end
   end
 
-  def admin_join_url(user, return_to = "http://www.instructure.com")
+  def admin_join_url(user, _return_to = "http://www.instructure.com")
     join_url(user, :admin)
   end
 
-  def participant_join_url(user, return_to = "http://www.instructure.com")
+  def participant_join_url(user, _return_to = "http://www.instructure.com")
     join_url(user)
   end
 
   def recordings
     fetch_recordings.map do |recording|
-      recording_format = recording.fetch(:playback, {}).fetch(:format, {})
-      {
-        recording_id:     recording[:recordID],
-        duration_minutes: recording_format[:length].to_i,
-        playback_url:     recording_format[:url],
-      }
+      recording_formats(recording)
     end
+  end
+
+  def recording(recording_id = nil)
+    unless recording_id.nil?
+      recording = fetch_recordings.find{ |r| r[:recordID]==recording_id }
+      recording_formats(recording) if recording
+    end
+  end
+
+  def recording_formats(recording)
+    recording_formats = recording.fetch(:playback, [])
+    {
+      recording_id:     recording[:recordID],
+      title:            recording[:name],
+      duration_minutes: filter_duration(recording_formats),
+      playback_url:     nil,
+      playback_formats: recording_formats,
+      created_at:       recording[:startTime].to_i,
+    }
+  end
+
+  def delete_recording(recording_id)
+    return { deleted: false } if recording_id.nil?
+    response = send_request(:deleteRecordings, recordID: recording_id)
+    { deleted: response.present? && response[:deleted].casecmp('true') == 0 }
   end
 
   def delete_all_recordings
@@ -112,7 +139,7 @@ class BigBlueButtonConference < WebConference
   def retouch?
     # If we've queried the room status recently, use that result to determine if
     # we need to recreate it.
-    if !@conference_active.nil?
+    unless @conference_active.nil?
       return !@conference_active
     end
 
@@ -120,7 +147,7 @@ class BigBlueButtonConference < WebConference
     # There's no harm in "creating" a room that already exists; the api will
     # just return the room info. So we'll just go ahead and recreate it
     # to make sure we don't accidentally redirect people to an inactive room.
-    return true
+    true
   end
 
   def join_url(user, type = :user)
@@ -149,13 +176,6 @@ class BigBlueButtonConference < WebConference
     Array(result)
   end
 
-  def delete_recording(recording_id)
-    response = send_request(:deleteRecordings, {
-      :recordID => recording_id,
-      })
-    response[:deleted] if response
-  end
-
   def generate_request(action, options)
     query_string = options.to_query
     query_string << ("&checksum=" + Digest::SHA1.hexdigest(action.to_s + query_string + config[:secret_dec]))
@@ -164,7 +184,6 @@ class BigBlueButtonConference < WebConference
 
   def send_request(action, options)
     url_str = generate_request(action, options)
-
     http_response = nil
     Canvas.timeout_protection("big_blue_button") do
       logger.debug "big blue button api call: #{url_str}"
@@ -172,7 +191,7 @@ class BigBlueButtonConference < WebConference
     end
 
     case http_response
-      when Net::HTTPSuccess
+    when Net::HTTPSuccess
         response = xml_to_hash(http_response.body)
         if response[:returncode] == 'SUCCESS'
           return response
@@ -184,7 +203,7 @@ class BigBlueButtonConference < WebConference
     end
     nil
   rescue
-    logger.error "big blue button unhandled exception #{$!}"
+    logger.error "big blue button unhandled exception #{$ERROR_INFO}"
     nil
   end
 
@@ -206,14 +225,23 @@ class BigBlueButtonConference < WebConference
     # The BBB API follows the pattern where a plural element (ie <bars>)
     # contains many singular elements (ie <bar>) and nothing else. Detect this
     # and return an array to be assigned to the plural element.
-    elsif node.name.singularize == child_elements.first.name
+    # It excludes the playback node as all of them may be showing different content.
+    elsif node.name.singularize == child_elements.first.name || node.name == "playback"
       child_elements.map { |child| xml_to_value(child) }
     # otherwise, make a hash of the child elements
     else
-      child_elements.reduce({}) do |hash, child|
+      child_elements.each_with_object({}) do |child, hash|
         hash[child.name.to_sym] = xml_to_value(child)
-        hash
+
       end
+    end
+  end
+
+  def filter_duration(recording_formats)
+    # This is a filter to take the duration from any of the playback formats that include a value in length.
+    # As not all the formats are the actual recording, identify the first one that has :length <> nil
+    recording_formats.each do |recording_format|
+      return recording_format[:length].to_i if recording_format[:length].present?
     end
   end
 end

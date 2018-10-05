@@ -150,6 +150,30 @@ define [
       real_min_str = (if real_minutes < 10 then "0" + real_minutes else real_minutes)
       "#{hours}:#{real_min_str}"
 
+    ###*
+     * Convert the total amount of minutes into a readable duration.
+     * @param {number}  Duration in minutes elapsed
+     * @return {string} String containing a formatted duration including hours and minutes
+     * Example:
+     *     ...
+     *     duration = 97
+     *     durationToString(duration)
+     *     ...
+     *     Returns
+     *       "Duration: 1 hour and 37 minutes"
+    ###
+    durationToString : (duration) ->
+      # stores the hours in the duration
+      hours = Math.floor(duration / 60)
+      # stores the remaining minutes after substracting the hours
+      minutes = duration % 60
+      if hours > 0
+        return I18n.t("Duration: %{hours} hours and %{minutes} minutes", {hours: hours, minutes: minutes})
+      else if minutes > 1
+        return I18n.t("Duration: %{minutes} minutes", {minutes: minutes})
+      else
+        return I18n.t("Duration: 1 minute")
+
     # helper for easily creating icon font markup
     addIcon : (icontype) ->
       new Handlebars.SafeString "<i class='icon-#{htmlEscape icontype}'></i>"
@@ -295,17 +319,20 @@ define [
         return inverse(this)
       fn(this)
 
-    # {{#eachWithIndex records}}
+    # {{#eachWithIndex records startingIndex=0}}
     #   <li class="legend_item{{_index}}"><span></span>{{Name}}</li>
     # {{/each_with_index}}
+    #
+    # (startingIndex will default to 0 if not specified)
     eachWithIndex: (context, options) ->
       fn = options.fn
       inverse = options.inverse
+      startingValue = parseInt(options.hash.startingValue || 0, 10)
       ret = ''
 
       if context and context.length > 0
         for own index, ctx of context
-          ctx._index = index
+          ctx._index = parseInt(index, 10) + startingValue
           ret += fn ctx
       else
         ret = inverse this
@@ -595,6 +622,11 @@ define [
 
     nf:(number, {hash: {format}}) ->
       numberFormat[format](number)
+
+    # Public: look up an element of a hash or array
+    #
+    lookup: (obj, key) ->
+      obj && obj[key]
   }
 
   return Handlebars

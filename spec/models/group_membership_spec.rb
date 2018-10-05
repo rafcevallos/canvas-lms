@@ -124,11 +124,25 @@ describe GroupMembership do
         expect(membership.messages_sent).to be_empty
       end
 
-      it "should dispatch a message if the course is available" do
+      it "should dispatch a message if the course is available and has started" do
         membership = @group1.group_memberships.build(user: @student1)
         Notification.create!(name: 'New Context Group Membership', category: 'TestImmediately')
         membership.save!
         expect(membership.messages_sent['New Context Group Membership']).not_to be_empty
+      end
+
+      it "should not dispatch a message if the course is available and has not started yet" do
+        course = course_factory(active_all: true)
+        course.start_at = 1.day.from_now
+        course.restrict_enrollments_to_course_dates = true
+        course.save!
+        student_in_course(active_all: true, course: course)
+        group1 = course.groups.create(group_category: GroupCategory.student_organized_for(course))
+        membership = group1.group_memberships.build(user: @student)
+        Notification.create!(name: 'New Context Group Membership', category: 'TestImmediately')
+        Notification.create!(name: 'New Context Group Membership Invitation', category: 'TestImmediately')
+        membership.save!
+        expect(membership.messages_sent).to be_empty
       end
     end
 
@@ -326,14 +340,25 @@ describe GroupMembership do
     end
 
     it "triggers a batch when membership is created" do
+      new_user = user_factory
+
       expect(DueDateCacher).to receive(:recompute).never
-      expect(DueDateCacher).to receive(:recompute_course).with(@course.id, match_array(@assignments[0..1].map(&:id)))
-      @group.group_memberships.create(:user => user_factory)
+      expect(DueDateCacher).to receive(:recompute_users_for_course).with(
+        new_user.id,
+        @course.id,
+        match_array(@assignments[0..1].map(&:id))
+      )
+
+      @group.group_memberships.create(:user => new_user)
     end
 
     it "triggers a batch when membership is deleted" do
       expect(DueDateCacher).to receive(:recompute).never
-      expect(DueDateCacher).to receive(:recompute_course).with(@course.id, match_array(@assignments[0..1].map(&:id)))
+      expect(DueDateCacher).to receive(:recompute_users_for_course).with(
+        @membership.user.id,
+        @course.id,
+        match_array(@assignments[0..1].map(&:id))
+      )
       @membership.destroy
     end
 
@@ -349,5 +374,20 @@ describe GroupMembership do
       @group = Account.default.groups.create!(:name => 'Group!')
       @group.group_memberships.create!(:user => user_factory)
     end
+  end
+
+  it "should run due date updates for discussion assignments" do
+    group_discussion_assignment
+    @assignment.update_attribute(:only_visible_to_overrides, true)
+    override = @assignment.assignment_overrides.create!(:set => @group1)
+    @student1 = student_in_course(course: @course, active_all: true).user
+    membership = @group1.add_user(@student1)
+    @topic.child_topic_for(@student1).reply_from(:user => @student1, :text => "sup")
+    sub = @assignment.submission_for_student(@student1)
+    expect(sub).to be_submitted
+    membership.destroy
+    expect(sub.reload).to be_deleted # no longer part of the group so the assignment no longer applies to them
+    membership.update_attribute(:workflow_state, 'accepted')
+    expect(sub.reload).to be_submitted # back to the way it was
   end
 end
