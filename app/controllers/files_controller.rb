@@ -16,7 +16,6 @@
 # with this program. If not, see <http://www.gnu.org/licenses/>.
 #
 
-require 'dynamic_form'
 require 'securerandom'
 
 # @API Files
@@ -28,9 +27,25 @@ require 'securerandom'
 #       "id": "File",
 #       "description": "",
 #       "properties": {
-#         "size": {
-#           "example": 4,
+#         "id": {
+#           "example": 569,
 #           "type": "integer"
+#         },
+#         "uuid": {
+#           "example": "SUj23659sdfASF35h265kf352YTdnC4",
+#           "type": "string"
+#         },
+#         "folder_id": {
+#           "example": 4207,
+#           "type": "integer"
+#         },
+#         "display_name": {
+#           "example": "file.txt",
+#           "type": "string"
+#         },
+#         "filename": {
+#           "example": "file.txt",
+#           "type": "string"
 #         },
 #         "content-type": {
 #           "example": "text/plain",
@@ -40,13 +55,10 @@ require 'securerandom'
 #           "example": "http://www.example.com/files/569/download?download_frd=1&verifier=c6HdZmxOZa0Fiin2cbvZeI8I5ry7yqD7RChQzb6P",
 #           "type": "string"
 #         },
-#         "id": {
-#           "example": 569,
-#           "type": "integer"
-#         },
-#         "display_name": {
-#           "example": "file.txt",
-#           "type": "string"
+#         "size": {
+#           "example": 43451,
+#           "type": "integer",
+#           "description": "file size in bytes"
 #         },
 #         "created_at": {
 #           "example": "2012-07-06T14:58:50Z",
@@ -57,10 +69,7 @@ require 'securerandom'
 #           "type": "datetime"
 #         },
 #         "unlock_at": {
-#           "type": "datetime"
-#         },
-#         "modified_at": {
-#           "example": "2012-07-06T14:58:50Z",
+#           "example": "2012-07-07T14:58:50Z",
 #           "type": "datetime"
 #         },
 #         "locked": {
@@ -72,7 +81,29 @@ require 'securerandom'
 #           "type": "boolean"
 #         },
 #         "lock_at": {
+#           "example": "2012-07-20T14:58:50Z",
 #           "type": "datetime"
+#         },
+#         "hidden_for_user": {
+#           "example": false,
+#           "type": "boolean"
+#         },
+#         "thumbnail_url": {
+#           "type": "string"
+#         },
+#         "modified_at": {
+#           "example": "2012-07-06T14:58:50Z",
+#           "type": "datetime"
+#         },
+#         "mime_class": {
+#           "type": "string",
+#           "example": "html",
+#           "description": "simplified content-type mapping"
+#         },
+#         "media_entry_id": {
+#           "type": "string",
+#           "example": "m-3z31gfpPf129dD3sSDF85SwSDFnwe",
+#           "description": "identifier for file in third-party transcoding service"
 #         },
 #         "locked_for_user": {
 #           "example": false,
@@ -85,21 +116,6 @@ require 'securerandom'
 #           "example": "This assignment is locked until September 1 at 12:00am",
 #           "type": "string"
 #         },
-#         "hidden_for_user": {
-#           "example": false,
-#           "type": "boolean"
-#         },
-#         "thumbnail_url": {
-#           "type": "string"
-#         },
-#         "mime_class": {
-#           "type": "string",
-#           "description": "simplified content-type mapping"
-#         },
-#         "media_entry_id": {
-#           "type": "string",
-#           "description": "identifier for file in third-party transcoding service"
-#         },
 #         "preview_url": {
 #           "type": "string",
 #           "description": "optional: url to the document preview. This url is specific to the user making the api call. Only included in submission endpoints."
@@ -108,6 +124,12 @@ require 'securerandom'
 #     }
 #
 class FilesController < ApplicationController
+  # show_relative is exempted from protect_from_forgery in order to allow
+  # brand-config-uploaded JS to work
+  # verify_authenticity_token is manually-invoked where @context is not
+  # an Account in show_relative
+  protect_from_forgery :except => [:api_capture, :show_relative], with: :exception
+
   before_action :require_user, only: :create_pending
   before_action :require_context, except: [
     :assessment_question_show, :image_thumbnail, :show_thumbnail,
@@ -170,16 +192,23 @@ class FilesController < ApplicationController
   end
 
   def check_file_access_flags
-    if params[:user_id] && params[:ts] && params[:sf_verifier]
-      user = api_find(User, params[:user_id]) if params[:user_id].present?
-      if user && user.valid_access_verifier?(params[:ts], params[:sf_verifier])
-        # attachment.rb checks for this session attribute when determining
-        # permissions, but it should be ignored by the rest of the models'
-        # permission checks
-        session['file_access_user_id'] = user.id
-        session['file_access_expiration'] = 1.hour.from_now.to_i
-        session[:permissions_key] = SecureRandom.uuid
-      end
+    begin
+      access_verifier = validate_access_verifier
+    rescue Users::AccessVerifier::InvalidVerifier
+      access_verifier = {}
+    end
+
+    if access_verifier[:user]
+      # attachment.rb checks for this session attribute when determining
+      # permissions, but it should be ignored by the rest of the models'
+      # permission checks
+      session['file_access_user_id'] = access_verifier[:user].global_id
+      session['file_access_real_user_id'] = access_verifier[:real_user]&.global_id
+      session['file_access_developer_key_id'] = access_verifier[:developer_key]&.global_id
+      session['file_access_root_acocunt_id'] = access_verifier[:root_account]&.global_id
+      session['file_access_oauth_host'] = access_verifier[:oauth_host]
+      session['file_access_expiration'] = 1.hour.from_now.to_i
+      session[:permissions_key] = SecureRandom.uuid
     end
     # These sessions won't get deleted when the user logs out since this
     # is on a separate domain, so we've added our own (stricter) timeout.
@@ -200,7 +229,7 @@ class FilesController < ApplicationController
         if authorized_action(root_folder, @current_user, :read)
           file_structure = {
             :folders => @context.active_folders.
-              reorder("COALESCE(parent_folder_id, 0), COALESCE(position, 0), COALESCE(name, ''), created_at").
+              reorder(Arel.sql("COALESCE(parent_folder_id, 0), COALESCE(position, 0), COALESCE(name, ''), created_at")).
               select(:id, :parent_folder_id, :name)
           }
 
@@ -281,7 +310,7 @@ class FilesController < ApplicationController
           Attachment.display_name_order_by_clause('attachments')
       end
       order_clause += ' DESC' if params[:order] == 'desc'
-      scope = scope.order(order_clause)
+      scope = scope.order(Arel.sql(order_clause))
 
       if params[:content_types].present?
         scope = scope.by_content_types(Array(params[:content_types]))
@@ -398,7 +427,7 @@ class FilesController < ApplicationController
     # verify that the requested attachment belongs to the submission
     return render_unauthorized_action if @submission && !@submission.includes_attachment?(@attachment)
     if @submission ? authorized_action(@submission, @current_user, :read) : authorized_action(@attachment, @current_user, :download)
-      render :json  => { :public_url => @attachment.authenticated_url(:secure => request.ssl?) }
+      render :json  => { :public_url => @attachment.public_url(:secure => request.ssl?) }
     end
   end
 
@@ -422,8 +451,11 @@ class FilesController < ApplicationController
   # @returns File
   def api_show
     get_context
-    @attachment = @context ? @context.attachments.find(params[:id]) : Attachment.find(params[:id])
-    raise ActiveRecord::RecordNotFound if @attachment.deleted?
+    @attachment = @context ? @context.attachments.not_deleted.find_by(id: params[:id]) : Attachment.not_deleted.find_by(id: params[:id])
+    unless @attachment
+      render json: { errors: [{message: "The specified resource does not exist."}] }, status: 404
+      return
+    end
     params[:include] = Array(params[:include])
     if authorized_action(@attachment,@current_user,:read)
       render :json => attachment_json(@attachment, @current_user, {}, { include: params[:include], omit_verifier_in_app: !value_to_boolean(params[:use_verifiers]) })
@@ -465,6 +497,7 @@ class FilesController < ApplicationController
       end
       return
     end
+
 
     verifier_checker = Attachments::Verification.new(@attachment)
     if (params[:verifier] && verifier_checker.valid_verifier_for_permission?(params[:verifier], :read, session)) ||
@@ -517,7 +550,7 @@ class FilesController < ApplicationController
         if attachment.content_type && attachment.content_type.match(/\Avideo\/|audio\//)
           attachment.context_module_action(@current_user, :read)
         end
-        format.html { render :show }
+        format.html { render :show, status: @attachment.locked_for?(@current_user) ? :forbidden : :ok }
       end
       format.json do
         json = {
@@ -537,11 +570,11 @@ class FilesController < ApplicationController
           # some form.
           if @current_user &&
              (attachment.canvadocable? ||
-              (service_enabled?(:google_docs_previews) && attachment.authenticated_url))
+              GoogleDocsPreview.previewable?(@domain_root_account, attachment))
             attachment.context_module_action(@current_user, :read)
           end
-          if url = service_enabled?(:google_docs_previews) && attachment.authenticated_url
-            json[:attachment][:authenticated_url] = url
+          if GoogleDocsPreview.previewable?(@domain_root_account, attachment)
+            json[:attachment][:public_url] = GoogleDocsPreview.url_for(attachment)
           end
 
           json_include = if @attachment.context.is_a?(User) || @attachment.context.is_a?(Course)
@@ -566,6 +599,10 @@ class FilesController < ApplicationController
     path = params[:file_path]
     file_id = params[:file_id]
     file_id = nil unless file_id.to_s =~ Api::ID_REGEX
+
+    # Manually-invoke verify_authenticity_token for non-Account contexts
+    # This is to allow Account-level file downloads to skip request forgery protection
+    verify_authenticity_token unless @context.is_a?(Account)
 
     #if the relative path matches the given file id use that file
     if file_id && @attachment = @context.attachments.where(id: file_id).first
@@ -634,7 +671,7 @@ class FilesController < ApplicationController
 
   def send_stored_file(attachment, inline=true)
     user = @current_user
-    user ||= api_find(User, params[:user_id]) if params[:user_id].present?
+    user ||= api_find(User, session['file_access_user_id']) if session['file_access_user_id'].present?
     attachment.context_module_action(user, :read) if user && !params[:preview]
     log_asset_access(@attachment, "files", "files") unless params[:preview]
     render_or_redirect_to_stored_file(
@@ -645,103 +682,101 @@ class FilesController < ApplicationController
   end
   protected :send_stored_file
 
-  def create_pending
-    @context = Context.find_by_asset_string(params[:attachment][:context_code])
-    @asset = Context.find_asset_by_asset_string(params[:attachment][:asset_string], @context) if params[:attachment][:asset_string]
-    @check_quota = true
-    permission_object = nil
-    permission = :create
-    intent = params[:attachment][:intent]
-
-    # Using workflow_state we can keep track of the files that have been built
-    # but we don't know that there's an s3 component for yet (it's still being
-    # uploaded)
-    workflow_state = 'unattached'
-    # There are multiple reasons why we could be building a file. The default
-    # is to upload it to a context.  In the other cases we need to check the
-    # permission related to the purpose to make sure the file isn't being
-    # uploaded just to disappear later
-    if @asset.is_a?(Assignment) && intent == 'comment'
-      permission_object = @asset
-      permission = :attach_submission_comment_files
-      @context = @asset
-      @check_quota = false
-    elsif @asset.is_a?(Assignment) && intent == 'submit'
-      permission_object = @asset
-      permission = (@asset.submission_types || "").match(/online_upload/) ? :submit : :nothing
-      @group = @asset.group_category.group_for(@current_user) if @asset.has_group_category?
-      @context = @group || @current_user
-      @check_quota = false
-    elsif @context && intent == 'attach_discussion_file'
-      permission_object = @context.discussion_topics.temp_record
-      permission = :attach
-    elsif @context && intent == 'message'
-      permission_object = @context
-      permission = :send_messages
-      @check_quota = false
-    elsif @context && intent && intent != 'upload'
-      # In other cases (like unzipping a file, extracting a QTI, etc.
-      # we don't actually want the uploaded file to show up in the context's
-      # file listings.  If you set its workflow_state to unattached_temporary
-      # then it will never be activated.
-      workflow_state = 'unattached_temporary'
-      @check_quota = false
+  # Is the user permitted to upload a file to the context with the given intent
+  # and related asset?
+  def authorized_upload?(context, user, asset, intent)
+    if asset.is_a?(Assignment) && intent == 'comment'
+      authorized_action(asset, @current_user, :attach_submission_comment_files)
+    elsif asset.is_a?(Assignment) && intent == 'submit'
+      # despite name, this is really just asking if the assignment expects an
+      # upload
+      if asset.allow_google_docs_submission?
+        authorized_action(asset, @current_user, :submit)
+      else
+        authorized_action(asset, @current_user, :nothing)
+      end
+    elsif intent == 'attach_discussion_file'
+      any_topic = context.discussion_topics.temp_record
+      authorized_action(any_topic, @current_user, :attach)
+    elsif intent == 'message'
+      authorized_action(context, @current_user, :send_messages)
+    else
+      any_attachment = context.attachments.temp_record
+      authorized_action(any_attachment, @current_user, :create)
     end
+  end
+  protected :authorized_upload?
 
-    @attachment = @context.attachments.build
-    permission_object ||= @attachment
-    @attachment.user = @current_user
-    @attachment.modified_at = Time.now.utc
-    if authorized_action(permission_object, @current_user, permission)
-      if @context.respond_to?(:is_a_context?) && @check_quota
-        get_quota
-        return if quota_exceeded(@context, named_context_url(@context, :context_files_url))
-      end
-      @attachment.filename = params[:attachment][:filename]
-      @attachment.file_state = 'deleted'
-      @attachment.workflow_state = workflow_state
-      if @context.respond_to?(:folders)
-        if params[:attachment][:folder_id].present?
-          @folder = @context.folders.active.where(id: params[:attachment][:folder_id]).first
-          return unless authorized_action(@folder, @current_user, :manage_contents)
-        end
-        if intent == 'submit' && context.respond_to?(:submissions_folder) && @asset
-          @folder ||= @context.submissions_folder(@asset.context)
-        end
-        @folder ||= Folder.unfiled_folder(@context)
-        @attachment.folder_id = @folder.id
-      end
-      @attachment.content_type = params[:attachment][:content_type].presence || Attachment.mimetype(@attachment.filename)
-      @attachment.set_publish_state_for_usage_rights
-      @attachment.save!
+  # Do we need to check quota for an upload to the context with the given
+  # intent?
+  def check_quota?(context, intent)
+    if ['upload', 'attach_discussion_file'].include?(intent) || !intent
+      # uploads and discussion attachments count against quota if the context
+      # has one. no explicit intent is assumed to be upload intent
+      context.respond_to?(:is_a_context?)
+    else
+      # other intents (e.g. 'comment', 'submit', message') do not run up
+      # against quota
+      false
+    end
+  end
+  protected :check_quota?
 
-      res = @attachment.ajax_upload_params(@current_pseudonym,
-              named_context_url(@context, :context_files_url, :format => :text, :duplicate_handling => params[:attachment][:duplicate_handling]),
-              s3_success_url(@attachment.id, :uuid => @attachment.uuid, :duplicate_handling => params[:attachment][:duplicate_handling]),
-              :no_redirect => params[:no_redirect],
-              :upload_params => {
-                'attachment[folder_id]' => params[:attachment][:folder_id] || '',
-                'attachment[unattached_attachment_id]' => @attachment.id,
-                'check_quota_after' => @check_quota ? '1' : '0'
-              },
-              :default_content_type => params[:default_content_type],
-              :ssl => request.ssl?)
-      render :json => res
+  # If no folder is specified, into what folder should uploads to the context
+  # with the given intent and related asset be filed?
+  def default_folder(context, asset, intent)
+    if intent == 'submit' && context.respond_to?(:submissions_folder) && asset
+      context.submissions_folder(asset.context)
+    else
+      Folder.unfiled_folder(context)
     end
   end
 
-  def s3_success
-    if params[:id].present?
-      verify_api_id
-      @attachment = Attachment.where(id: params[:id], workflow_state: 'unattached', uuid: params[:uuid]).first
+  # For the given intent and related asset, should the uploaded file be treated
+  # as temporary? (e.g. in cases like unzipping a file, extracting a QTI, etc.
+  # we don't actually want the uploaded file to show up in the context's file
+  # listings.)
+  def temporary_file?(asset, intent)
+    intent &&
+    !['message', 'attach_discussion_file', 'upload'].include?(intent) &&
+    !(asset.is_a?(Assignment) && ['comment', 'submit'].include?(intent))
+  end
+  protected :temporary_file?
+
+  def create_pending
+    # to what entity should the attachment "belong"?
+    # regarding which entity is the attachment being created?
+    # with what intent is the attachment being created?
+    @context = Context.find_by_asset_string(params[:attachment][:context_code])
+    @asset = Context.find_asset_by_asset_string(params[:attachment][:asset_string], @context) if params[:attachment][:asset_string]
+    intent = params[:attachment][:intent]
+
+    # correct context for assignment-related attachments
+    if @asset.is_a?(Assignment) && intent == 'comment'
+      # attachments that are comments on an assignment "belong" to the
+      # assignment, even if another context was nominally provided
+      @context = @asset
+    elsif @asset.is_a?(Assignment) && intent == 'submit'
+      # assignment submissions belong to either the group (if it's a group
+      # assignment) or the user, even if another context was nominally provided
+      group = @asset.group_category.group_for(@current_user) if @asset.has_group_category?
+      @context = group || @current_user
     end
-    details = @attachment.s3object.data rescue nil
-    if @attachment && details
-      deleted_attachments = @attachment.handle_duplicates(params[:duplicate_handling])
-      @attachment.process_s3_details!(details)
-      render_attachment_json(@attachment, deleted_attachments)
-    else
-      render :json => {:errors => [{:attribute => 'attachment', :message => 'upload failed'}]}
+
+    if authorized_upload?(@context, @asset, intent, @current_user)
+      api_attachment_preflight(@context, request,
+        check_quota: check_quota?(@context, intent),
+        folder: default_folder(@context, @asset, intent),
+        temporary: temporary_file?(@asset, intent),
+        params: {
+          filename: params[:attachment][:filename],
+          content_type: params[:attachment][:content_type],
+          size: params[:attachment][:size],
+          parent_folder_id: params[:attachment][:folder_id],
+          on_duplicate: params[:attachment][:on_duplicate],
+          no_redirect: params[:no_redirect],
+          success_include: params[:success_include]
+        })
     end
   end
 
@@ -756,7 +791,13 @@ class FilesController < ApplicationController
     @attachment.uploaded_data = params[:file] || params[:attachment] && params[:attachment][:uploaded_data]
     if @attachment.save
       # for consistency with the s3 upload client flow, we redirect to the success url here to finish up
-      redirect_to api_v1_files_create_success_url(@attachment, :uuid => @attachment.uuid, :on_duplicate => params[:on_duplicate], :quota_exemption => params[:quota_exemption])
+      includes = Array(params[:success_include])
+      includes << 'avatar' if @attachment.folder == @attachment.user&.profile_pics_folder
+      redirect_to api_v1_files_create_success_url(@attachment,
+        uuid: @attachment.uuid,
+        on_duplicate: params[:on_duplicate],
+        quota_exemption: params[:quota_exemption],
+        include: includes)
     else
       head :bad_request
     end
@@ -765,6 +806,12 @@ class FilesController < ApplicationController
   def api_create_success_cors
     head :ok
   end
+
+  # intentionally narrower than the list on `Attachment.belongs_to :context`
+  VALID_ATTACHMENT_CONTEXTS = [
+    'User', 'Course', 'Group', 'Assignment', 'ContentMigration',
+    'Quizzes::QuizSubmission', 'ContentMigration', 'Quizzes::QuizSubmission'
+  ].freeze
 
   def api_capture
     unless InstFS.enabled?
@@ -786,8 +833,14 @@ class FilesController < ApplicationController
       return
     end
 
-    @context = Context.find_polymorphic(params[:context_type], params[:context_id])
-    @attachment = @context.attachments.build
+    unless VALID_ATTACHMENT_CONTEXTS.include?(params[:context_type])
+      head :bad_request
+      return
+    end
+
+    model = Object.const_get(params[:context_type])
+    @context = model.where(id: params[:context_id]).first
+    @attachment = @context.shard.activate{ Attachment.where(context: @context).build }
 
     # service metadata
     @attachment.filename = params[:name]
@@ -814,9 +867,48 @@ class FilesController < ApplicationController
       @context.file_upload_success_callback(@attachment)
     end
 
-    url_params = {}
-    url_params[:include] = 'enhanced_preview_url' if @context.is_a?(User) || @context.is_a?(Course)
-    render json: {}, status: :created, location: api_v1_attachment_url(@attachment, url_params)
+    if params[:progress_id]
+      progress = Progress.find(params[:progress_id])
+
+      # TODO: The `submit_assignment` param is used to help in backwards compat for fixing auto submissions,
+      # can be removed in the next release.
+      if params[:submit_assignment].to_s == 'true'
+        if progress.tag == 'upload_via_url'
+          assignment = progress.context
+          homework_service = Services::SubmitHomeworkService.new(@attachment, assignment)
+          begin
+            homework_service.submit(progress.created_at, params[:eula_agreement_timestamp])
+            homework_service.deliver_email
+
+            progress.complete unless progress.failed?
+          rescue => error
+            error_id = Canvas::Errors.capture_exception(self.class.name, error)[:error_report]
+            progress.message = "Unexpected error, ID: #{error_id || 'unknown'}"
+            progress.save
+            progress.fail
+            logger.error "Error submitting a file: #{error} - #{error.backtrace}"
+            homework_service.failure_email
+          end
+        end
+      end
+
+      if progress.running?
+        progress.set_results('id' => @attachment.id)
+        progress.complete!
+      end
+    end
+
+    includes = []
+    if Array(params[:include]).include?('preview_url')
+      includes << 'preview_url'
+    # only use implicit enhanced_preview_url if there is no explicit preview_url
+    elsif @context.is_a?(User) || @context.is_a?(Course)
+      includes << 'enhanced_preview_url'
+    end
+
+    render status: :created,
+      json: attachment_json(@attachment, @attachment.user, {}, include: includes),
+      location: api_v1_attachment_url(@attachment, include: includes)
   end
 
   def api_create_success
@@ -841,15 +933,25 @@ class FilesController < ApplicationController
       @attachment.context.file_upload_success_callback(@attachment)
     end
 
-    json_params = { omit_verifier_in_app: true }
+    json_params = {
+      omit_verifier_in_app: true,
+      include: []
+    }
 
-    if @attachment.context.is_a?(User) || @attachment.context.is_a?(Course) || @attachment.context.is_a?(Group)
-      json_params[:include] ||= []
+    includes = Array(params[:include])
+
+    if includes.include?('avatar')
+      json_params[:include] << 'avatar'
+    end
+
+    if includes.include?('preview_url')
+      json_params[:include] << 'preview_url'
+    # only use implicit enhanced_preview_url if there is no explicit preview_url
+    elsif @attachment.context.is_a?(User) || @attachment.context.is_a?(Course) || @attachment.context.is_a?(Group)
       json_params[:include] << 'enhanced_preview_url'
     end
 
     if @attachment.usage_rights_id.present?
-      json_params[:include] ||= []
       json_params[:include] << 'usage_rights'
     end
 
@@ -858,6 +960,7 @@ class FilesController < ApplicationController
     end
 
     json = attachment_json(@attachment, @current_user, {}, json_params)
+    json.merge!(doc_preview_json(@attachment, @current_user))
 
     # render as_text for IE, otherwise it'll prompt
     # to download the JSON response
@@ -872,86 +975,6 @@ class FilesController < ApplicationController
       render :json => { :upload_status => 'pending' }
     else
       render :json => { :upload_status => 'errored', :message => @attachment.upload_error_message }
-    end
-  end
-
-  def create
-    if (folder_id = params[:attachment].delete(:folder_id)) && folder_id.present?
-      @folder = @context.folders.active.where(id: folder_id).first
-      return unless authorized_action(@folder, @current_user, :manage_contents)
-    end
-    @folder ||= Folder.unfiled_folder(@context)
-    params[:attachment][:uploaded_data] ||= params[:attachment_uploaded_data]
-    params[:attachment][:uploaded_data] ||= params[:file]
-    params[:attachment][:user] = @current_user
-    params[:attachment].delete :context_id
-    params[:attachment].delete :context_type
-    duplicate_handling = params.delete :duplicate_handling
-    if (unattached_attachment_id = params[:attachment].delete(:unattached_attachment_id)) && unattached_attachment_id.present?
-      @attachment = @context.attachments.where(id: unattached_attachment_id, workflow_state: 'unattached').first
-    end
-    @attachment ||= @context.attachments.build
-    if authorized_action(@attachment, @current_user, :create)
-      get_quota
-      return if (params[:check_quota_after].nil? || params[:check_quota_after] == '1') &&
-                  quota_exceeded(@context, named_context_url(@context, :context_files_url))
-
-      respond_to do |format|
-        @attachment.folder_id ||= @folder.id
-        @attachment.workflow_state = nil
-        @attachment.file_state = 'available'
-        @attachment.set_publish_state_for_usage_rights
-        success = nil
-        if params[:attachment] && params[:attachment][:source_attachment_id]
-          a = Attachment.find(params[:attachment].delete(:source_attachment_id))
-          if a.root_attachment_id && att = @folder.attachments.where(id: a.root_attachment_id).first
-            @attachment = att
-            success = true
-          elsif a.grants_right?(@current_user, session, :download)
-            @attachment = a.clone_for(@context, @attachment)
-            success = @attachment.save
-          end
-        end
-        if params[:attachment][:uploaded_data]
-          if (@attachment.workflow_state_was != 'unattached' || params[:check_quota_after] != '0') &&
-              Attachment.over_quota?(@context, params[:attachment][:uploaded_data].size)
-            @attachment.errors.add(:base, t('Upload failed, quota exceeded'))
-          else
-            success = @attachment.update_attributes(strong_attachment_params)
-            @attachment.errors.add(:base, t('errors.server_error', "Upload failed, server error, please try again.")) unless success
-          end
-        else
-          @attachment.errors.add(:base, t('errors.missing_field', "Upload failed, expected form field missing"))
-        end
-        deleted_attachments = @attachment.handle_duplicates(duplicate_handling) if success
-        unless @attachment.downloadable?
-          success = false
-          unless @attachment.errors.any?
-            if (params[:attachment][:uploaded_data].size == 0 rescue false)
-              @attachment.errors.add(:base, t('errors.empty_file', "That file is empty.  Please upload a different file."))
-            else
-              @attachment.errors.add(:base, t('errors.upload_failed', "Upload failed, please try again."))
-            end
-          end
-          unless @attachment.new_record?
-            @attachment.destroy rescue @attachment.delete
-          end
-        end
-        if success
-          @attachment.move_to_bottom
-          format.html { return_to(params[:return_to], named_context_url(@context, :context_files_url)) }
-          format.json do
-            render_attachment_json(@attachment, deleted_attachments, @folder)
-          end
-          format.text do
-            render_attachment_json(@attachment, deleted_attachments, @folder)
-          end
-        else
-          format.html { render :new }
-          format.json { render :json => @attachment.errors, :status => :bad_request }
-          format.text { render :json => @attachment.errors, :status => :bad_request }
-        end
-      end
     end
   end
 
@@ -1145,13 +1168,17 @@ class FilesController < ApplicationController
 
   def image_thumbnail
     cancel_cache_buster
-    url = Rails.cache.fetch(['thumbnail_url', params[:uuid], params[:size]].cache_key, :expires_in => 30.minutes) do
+    # include authenticator fingerprint so we don't redirect to an
+    # authenticated thumbnail url for the wrong user
+    cache_key = ['thumbnail_url', params[:uuid], params[:size], file_authenticator.fingerprint].cache_key
+    url = Rails.cache.read(cache_key)
+    unless url
       attachment = Attachment.active.where(id: params[:id], uuid: params[:uuid]).first if params[:id].present?
       thumb_opts = params.slice(:size)
-      url = attachment.thumbnail_url(thumb_opts) rescue nil
-      url ||= '/images/no_pic.gif'
-      url
+      url = authenticated_thumbnail_url(attachment, thumb_opts)
+      Rails.cache.write(cache_key, url, :expires_in => 30.minutes) if url
     end
+    url ||= '/images/no_pic.gif'
     redirect_to url
   end
 
@@ -1175,24 +1202,6 @@ class FilesController < ApplicationController
     headers['Access-Control-Allow-Methods'] = 'POST, PUT, DELETE, GET, OPTIONS'
     headers['Access-Control-Request-Method'] = '*'
     headers['Access-Control-Allow-Headers'] = 'Origin, X-Requested-With, Content-Type, Accept, Authorization, Accept-Encoding'
-  end
-
-  def render_attachment_json(attachment, deleted_attachments, folder = attachment.folder)
-    json = {
-      :attachment => attachment.as_json(
-        allow: :uuid,
-        methods: [:uuid,:readable_size,:mime_class,:currently_locked,:thumbnail_url],
-        permissions: {user: @current_user, session: session},
-        include_root: false
-      ).merge(doc_preview_json(attachment, @current_user)),
-      :deleted_attachment_ids => deleted_attachments.map(&:id)
-    }
-    if folder.name == 'profile pictures'
-      json[:avatar] = avatar_json(@current_user, attachment, { :type => 'attachment' })
-    end
-    StringifyIds.recursively_stringify_ids(json)
-
-    render :json => json, :as_text => true
   end
 
   def strong_attachment_params

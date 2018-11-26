@@ -195,9 +195,6 @@ class GradeSummaryPresenter
         ActiveRecord::Associations::Preloader.new.preload(ss, :originality_reports)
       end
 
-      visible_assignment_ids = AssignmentStudentVisibility.visible_assignment_ids_for_user(student_id, @context.id)
-      ss.select!{ |submission| visible_assignment_ids.include?(submission.assignment_id) }
-
       assignments_index = assignments.index_by(&:id)
 
       # preload submission comment stuff
@@ -216,6 +213,14 @@ class GradeSummaryPresenter
     end
   end
 
+  def rubric_assessments
+    assignment_presenters.flat_map(&:rubric_assessments)
+  end
+
+  def rubrics
+    rubric_assessments.map(&:rubric).uniq
+  end
+
   # Called by external classes that want to make sure we clear out
   # cached data. Most likely this is only the GradeCalculator
   def self.invalidate_cache(context)
@@ -223,26 +228,7 @@ class GradeSummaryPresenter
   end
 
   def assignment_stats
-    # performance note: There is an overlap between
-    # Submission.not_placeholder and the submission where clause.
-    #
-    # note: because a score is needed for max/min/ave we are not filtering
-    # by assignment_student_visibilities, if a stat is added that doesn't
-    # require score then add a filter when the DA feature is on
-    @stats ||= begin
-      Rails.cache.fetch(GradeSummaryPresenter.cache_key(@context, 'assignment_stats')) do
-        @context.assignments.active.except(:order).
-          joins(:submissions).
-          joins("INNER JOIN #{Enrollment.quoted_table_name} enrollments ON submissions.user_id = enrollments.user_id").
-          merge(Enrollment.of_student_type.active_or_pending).
-          merge(Submission.not_placeholder).
-          where(enrollments: {course_id: @context}).
-          where("submissions.excused IS NOT TRUE").
-          group("assignments.id").
-          select("assignments.id, max(score) max, min(score) min, avg(score) avg, count(submissions.id) count").
-          index_by(&:id)
-      end
-    end
+    @stats ||= ScoreStatistic.where(assignment: @context.assignments.active.except(:order)).index_by(&:assignment_id)
   end
 
   def assignment_presenters
@@ -259,8 +245,9 @@ class GradeSummaryPresenter
   def courses_with_grades
     @courses_with_grades ||= begin
       student.shard.activate do
-        if student_is_user?
-          Course.where(id: student.participating_student_current_and_concluded_course_ids).to_a
+        course_list = if student_is_user?
+          Course.preload(:enrollment_term, :grading_period_groups).
+            where(id: student.participating_student_current_and_concluded_course_ids).to_a
         elsif user_an_observer_of_student?
           observed_courses = []
           Shard.partition_by_shard(student.participating_student_current_and_concluded_course_ids) do |course_ids|
@@ -269,12 +256,15 @@ class GradeSummaryPresenter
               where(course_id: course_ids, user_id: @current_user, associated_user_id: student).
               pluck(:course_id)
             next unless observed_course_ids.any?
-            observed_courses += Course.where(id: observed_course_ids).to_a
+            observed_courses += Course.preload(:enrollment_term, :grading_period_groups).
+              where(id: observed_course_ids).to_a
           end
           observed_courses
         else
           []
         end
+
+        course_list.select { |c| c.grants_right?(student, :read) }
       end
     end
   end

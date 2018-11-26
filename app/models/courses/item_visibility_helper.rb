@@ -1,3 +1,21 @@
+#
+# Copyright (C) 2018 - present Instructure, Inc.
+#
+# This file is part of Canvas.
+#
+# Canvas is free software: you can redistribute it and/or modify it under
+# the terms of the GNU Affero General Public License as published by the Free
+# Software Foundation, version 3 of the License.
+#
+# Canvas is distributed in the hope that it will be useful, but WITHOUT ANY
+# WARRANTY; without even the implied warranty of MERCHANTABILITY or FITNESS FOR
+# A PARTICULAR PURPOSE. See the GNU Affero General Public License for more
+# details.
+#
+# You should have received a copy of the GNU Affero General Public License along
+# with this program. If not, see <http://www.gnu.org/licenses/>.
+#
+
 module Courses
   module ItemVisibilityHelper
     ITEM_TYPES = [:assignment, :discussion, :page, :quiz].freeze
@@ -34,16 +52,18 @@ module Courses
     end
 
     def get_visibilities_for_user_ids(item_type, user_ids)
-      opts = {user_id: user_ids, course_id: [self.id]}
-      case item_type
-      when :assignment
-        AssignmentStudentVisibility.visible_assignment_ids_in_course_by_user(opts)
-      when :discussion
-        DiscussionTopic.visible_ids_by_user(opts)
-      when :page
-        WikiPage.visible_ids_by_user(opts)
-      when :quiz
-        Quizzes::QuizStudentVisibility.visible_quiz_ids_in_course_by_user(opts)
+      Shackles.activate(:slave) do
+        opts = {user_id: user_ids, course_id: [self.id]}
+        case item_type
+        when :assignment
+          AssignmentStudentVisibility.visible_assignment_ids_in_course_by_user(opts)
+        when :discussion
+          DiscussionTopic.visible_ids_by_user(opts.merge(:item_type => item_type))
+        when :page
+          WikiPage.visible_ids_by_user(opts)
+        when :quiz
+          Quizzes::QuizStudentVisibility.visible_quiz_ids_in_course_by_user(opts)
+        end
       end
     end
   end

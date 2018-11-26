@@ -17,9 +17,9 @@ const karmaConfig = {
 
   // this is to make a nice "spec failures" report in the jenkins build instead of having to look at the log output
   junitReporter: {
-    outputDir: 'coverage-js', // just reusing same dir as the coverage stuff so it doesn't need its own .gitignore
-    outputFile: 'karma-test-results.xml', // if included, results will be saved as $outputDir/$browserName/$outputFile
-    useBrowserName: false, // add browser name to report and classes names
+    outputDir: 'coverage-js/junit-reports',
+    outputFile: `karma-${process.env.JSPEC_GROUP || 'all'}.xml`,
+    useBrowserName: false, // don't add browser name to report and classes names
   },
   specReporter: {
     maxLogLines: 50, // limit number of lines logged per test
@@ -85,15 +85,15 @@ const karmaConfig = {
 if (process.env.COVERAGE) {
   karmaConfig.reporters.push('coverage-istanbul')
   karmaConfig.coverageIstanbulReporter = {
-    reports: ['html'],
-    dir: 'coverage-js/',
+    reports: ['html', 'json'],
+    dir: 'coverage-karma/',
     fixWebpackSourcePaths: true
   }
   karmaConfig.webpack.module.rules.unshift({
     test: /\.(js|coffee)$/,
     use: {
       loader: 'istanbul-instrumenter-loader',
-      options: { esModules: true }
+      options: { esModules: true, produceSourceMap: true }
     },
     enforce: 'post',
     exclude: /(node_modules|spec|public\/javascripts\/(bower|client_apps|translations|vendor|custom_moment_locales|custom_timezone_locales))/,

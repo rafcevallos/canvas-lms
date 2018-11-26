@@ -18,11 +18,17 @@
 
 import '@instructure/ui-themes/lib/canvas'
 import React from 'react'
-import { mount, shallow } from 'enzyme'
+import {mount, shallow} from 'enzyme'
 import ExternalFeedsTray from '../ExternalFeedsTray'
+import {ConnectedRSSFeedList} from '../RSSFeedList'
 
 const defaultProps = () => ({
-  atomFeedUrl: "www.test.com",
+  atomFeedUrl: 'www.test.com',
+  permissions: {
+    create: false,
+    manage_content: false,
+    moderate: false
+  }
 })
 
 test('renders the ExternalFeedsTray component', () => {
@@ -30,13 +36,49 @@ test('renders the ExternalFeedsTray component', () => {
   expect(tree.exists()).toBe(true)
 })
 
+test('renders the AddExternalFeed component when user has permissions', () => {
+  const props = defaultProps()
+  props.permissions = {
+    create: true,
+    manage_content: false,
+    moderate: false
+  }
+  const tree = shallow(<ExternalFeedsTray {...props} />)
+  const node = tree.find('.announcements-tray__add-rss-root')
+  expect(node).toHaveLength(1)
+})
+
+test('does not render the AddExternalFeed component when user is student', () => {
+  const props = defaultProps()
+  props.permissions = {
+    create: false,
+    manage_content: false,
+    moderate: false
+  }
+  const tree = shallow(<ExternalFeedsTray {...props} />)
+  const node = tree.find('.announcements-tray__add-rss-root')
+  expect(node).toHaveLength(0)
+})
+
+test('does not render the RSSFeedList component when user is student', () => {
+  const props = defaultProps()
+  props.permissions = {
+    create: false,
+    manage_content: false,
+    moderate: false
+  }
+  const tree = shallow(<ExternalFeedsTray {...props} />)
+  const node = tree.find(ConnectedRSSFeedList)
+  expect(node).toHaveLength(0)
+})
+
 test('renders the external feeds link', () => {
   const tree = mount(<ExternalFeedsTray {...defaultProps()} />)
-  const node = tree.find('Link')
+  const node = tree.find('Button')
   expect(node.text()).toBe('External feeds')
 })
 
 test('renders the RSS feed link', () => {
   const tree = shallow(<ExternalFeedsTray {...defaultProps()} />)
-  expect(tree.find('#rss-feed-link Container').prop('children')).toMatch('RSS Feed')
+  expect(tree.find('#rss-feed-link View').prop('children')).toMatch('RSS Feed')
 })

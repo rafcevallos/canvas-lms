@@ -60,6 +60,12 @@ define [
       dir = $(e.target).data 'view'
       @selectDir dir
 
+    resetSidebar: () =>
+      _.each @directories, (d) -> d.remove()
+      @directories = []
+      @cachedDirectories = {}
+      @addDirFor @rootOutcomeGroup
+
     # Adds a directory view for an outcome group.
     # Returns the directory view.
     addDirFor: (outcomeGroup) ->
@@ -186,13 +192,15 @@ define [
 
     # passing in FindDialog because of circular dependency
     findDialog: (FindDialog) =>
-      unless findDialog
+      if !findDialog
         findDialog = new FindDialog
           title: I18n.t 'titles.find_outcomes', 'Find Outcomes'
           selectedGroup: @selectedGroup()
           directoryView: new FindDirectoryView
             outcomeGroup: @selectedGroup()
         findDialog.on 'import', @addAndSelect, this
+      else
+        findDialog.updateSelection(@selectedGroup())
       findDialog.show()
 
     # Find a directory for a given outcome group or add a new directory view.

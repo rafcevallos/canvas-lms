@@ -17,7 +17,6 @@
 #
 
 # @API Quiz Questions
-# @beta
 #
 # @model QuizQuestion
 #   {
@@ -191,7 +190,6 @@ class Quizzes::QuizQuestionsController < ApplicationController
   before_action :require_question, :only => [:show]
 
   # @API List questions in a quiz or a submission
-  # @beta
   #
   # Returns the paginated list of QuizQuestions in this quiz.
   #
@@ -218,7 +216,6 @@ class Quizzes::QuizQuestionsController < ApplicationController
   end
 
   # @API Get a single quiz question
-  # @beta
   #
   # Returns the quiz question with the given id
   #
@@ -238,7 +235,6 @@ class Quizzes::QuizQuestionsController < ApplicationController
   end
 
   # @API Create a single quiz question
-  # @beta
   #
   # Create a new quiz question for this quiz
   #
@@ -282,7 +278,9 @@ class Quizzes::QuizQuestionsController < ApplicationController
 
       question_data = params[:question]&.to_unsafe_h
       question_data ||= {}
-
+      if question_data.key?(:question_text)
+        question_data[:question_text] = process_incoming_html_content(question_data[:question_text])
+      end
       if question_data[:quiz_group_id]
         @group = @quiz.quiz_groups.find(question_data[:quiz_group_id])
       end
@@ -301,14 +299,14 @@ class Quizzes::QuizQuestionsController < ApplicationController
       @assessment_questions = @bank.assessment_questions.active.where(id: params[:assessment_questions_ids].split(",")).to_a
       @group = @quiz.quiz_groups.where(id: params[:quiz_group_id]).first if params[:quiz_group_id].to_i > 0
       @questions = @quiz.add_assessment_questions(@assessment_questions, @group)
-
+      bank_outcome_ids = @bank.learning_outcome_alignments.select(:learning_outcome_id)
+      LearningOutcome.ensure_presence_in_context(bank_outcome_ids, @context)
       render json: questions_json(@questions, @current_user, session, [:assessment_question])
     end
   end
   protected :add_questions
 
   # @API Update an existing quiz question
-  # @beta
   #
   # Updates an existing quiz question for this quiz
   #
@@ -356,7 +354,7 @@ class Quizzes::QuizQuestionsController < ApplicationController
       @question = @quiz.quiz_questions.active.find(params[:id])
       question_data = params[:question].to_unsafe_h
       question_data[:regrade_user] = @current_user
-      question_data ||= {}
+      question_data[:question_text] = process_incoming_html_content(question_data[:question_text])
 
       if question_data[:quiz_group_id]
         @group = @quiz.quiz_groups.find(question_data[:quiz_group_id])
@@ -376,7 +374,6 @@ class Quizzes::QuizQuestionsController < ApplicationController
   end
 
   # @API Delete a quiz question
-  # @beta
   #
   # @argument quiz_id [Required, Integer]
   #   The associated quiz's unique identifier

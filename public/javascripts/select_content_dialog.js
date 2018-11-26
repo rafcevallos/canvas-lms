@@ -24,7 +24,7 @@ import ReactDOM from 'react-dom'
 import FileSelectBox from 'jsx/context_modules/FileSelectBox'
 import _ from 'underscore'
 import htmlEscape from 'str/htmlEscape'
-import uploadFile from 'jsx/shared/upload_file'
+import { uploadFile } from 'jsx/shared/upload_file'
 import iframeAllowances from 'jsx/external_apps/lib/iframeAllowances'
 import './jquery.instructure_date_and_time' /* datetime_field */
 import './jquery.ajaxJSON'
@@ -47,10 +47,14 @@ import './jquery.templateData'
     onContextExternalToolSelect : function(e) {
       e.preventDefault();
       var $tool = $(this);
+      var toolName = $tool.find('a').text();
       if($(this).hasClass('selected') && !$(this).hasClass('resource_selection')) {
         $(this).removeClass('selected');
+        $("#external_tool_create_url").val('');
+        $.screenReaderFlashMessage(I18n.t('Unselected external tool %{tool}', {tool: toolName}));
         return;
       }
+      $.screenReaderFlashMessage(I18n.t('Selected external tool %{tool}', {tool: toolName}));
       $tool.parents(".tools").find(".tool.selected").removeClass('selected');
       $tool.addClass('selected');
       if($tool.hasClass('resource_selection')) {
@@ -402,8 +406,8 @@ import './jquery.templateData'
                 on_duplicate: 'rename',
                 no_redirect: true
               };
-              uploadFile(url, data, file).then(function(response) {
-                callback(response.data)
+              uploadFile(url, data, file).then(function(attachment) {
+                callback(attachment)
               }).catch(function(response) {
                 $("#select_context_content_dialog").loadingImage('remove');
                 $("#select_context_content_dialog").errorBox(I18n.t('errors.failed_to_create_item', 'Failed to Create new Item'));

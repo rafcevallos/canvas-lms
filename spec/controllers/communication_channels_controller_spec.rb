@@ -17,6 +17,7 @@
 #
 
 require File.expand_path(File.dirname(__FILE__) + '/../sharding_spec_helper')
+require File.expand_path(File.dirname(__FILE__) + '/../apis/api_spec_helper')
 
 describe CommunicationChannelsController do
   before :once do
@@ -29,7 +30,7 @@ describe CommunicationChannelsController do
     it "should create a new CC unconfirmed" do
       user_session(@user)
       post 'create', params: {:user_id => @user.id, :communication_channel => { :address => 'jt@instructure.com', :type => 'email'  }}
-      expect(response).to be_success
+      expect(response).to be_successful
       expect(@user.communication_channels.length).to eq 1
       expect(@user.email_channel).to be_unconfirmed
       expect(@user.email_channel.path).to eq 'jt@instructure.com'
@@ -40,7 +41,7 @@ describe CommunicationChannelsController do
       cc = u.communication_channels.create!(:path => 'jt@instructure.com', :path_type => 'email') { |cc| cc.workflow_state = 'active' }
       user_session(@user)
       post 'create', params: {:user_id => @user.id, :communication_channel => { :address => 'jt@instructure.com', :type => 'email' }}
-      expect(response).to be_success
+      expect(response).to be_successful
       expect(@user.communication_channels.length).to eq 1
       expect(@user.email_channel).not_to eq cc
       expect(@user.email_channel).to be_unconfirmed
@@ -54,7 +55,7 @@ describe CommunicationChannelsController do
       }
       user_session(@user)
       post 'create', params: {:user_id => @user.id, :communication_channel => { :address => 'jt@instructure.com', :type => 'email' }}
-      expect(response).to be_success
+      expect(response).to be_successful
       expect(@user.communication_channels.length).to eq 1
       expect(@user.email_channel).to be_unconfirmed
       expect(@user.email_channel.path).to eq 'jt@instructure.com'
@@ -65,7 +66,7 @@ describe CommunicationChannelsController do
       cc = @user.communication_channels.create!(:path => 'jt@instructure.com', :path_type => 'email') { |cc| cc.workflow_state = 'active' }
       user_session(@user)
       post 'create', params: {:user_id => @user.id, :communication_channel => { :address => 'jt@instructure.com', :type => 'email' }}
-      expect(response).not_to be_success
+      expect(response).not_to be_successful
     end
   end
 
@@ -106,7 +107,7 @@ describe CommunicationChannelsController do
         code = @cc.confirmation_code
         @cc.confirm
         get 'confirm', params: {:nonce => code}
-        expect(response).not_to be_success
+        expect(response).not_to be_successful
         expect(response).to render_template("confirm_failed")
         @cc.reload
         expect(@cc).to be_active
@@ -117,7 +118,7 @@ describe CommunicationChannelsController do
         CommunicationChannel.where(id: @cc).update_all(path: 'not-an-email')
         user_session(@user, @pseudonym)
         get 'confirm', params: {nonce: @cc.confirmation_code}
-        expect(response).not_to be_success
+        expect(response).not_to be_successful
         expect(response).to render_template("confirm_failed")
       end
 
@@ -217,7 +218,7 @@ describe CommunicationChannelsController do
 
         # @domain_root_account == Account.default
         post 'confirm', params: {:nonce => @cc.confirmation_code}
-        expect(response).to be_success
+        expect(response).to be_successful
         expect(response).to render_template('confirm')
         expect(assigns[:pseudonym]).to eq @pseudonym
         expect(assigns[:root_account]).to eq @account
@@ -241,7 +242,7 @@ describe CommunicationChannelsController do
         expect(@enrollment).to be_invited
 
         get 'confirm', params: {:nonce => @cc.confirmation_code, :enrollment => @enrollment.uuid}
-        expect(response).to be_success
+        expect(response).to be_successful
         expect(assigns[:pseudonym]).to be_new_record
         expect(assigns[:pseudonym].unique_id).to eq 'jt@instructure.com'
       end
@@ -279,7 +280,7 @@ describe CommunicationChannelsController do
         controller.instance_variable_set(:@current_user, @user)
 
         get 'confirm', params: {:nonce => @cc.confirmation_code}
-        expect(response).to be_success
+        expect(response).to be_successful
         expect(assigns[:pseudonym]).to be_new_record
         expect(assigns[:pseudonym].unique_id).to eq 'jt@instructure.com'
       end
@@ -316,7 +317,7 @@ describe CommunicationChannelsController do
         expect(@enrollment).to be_invited
 
         get 'confirm', params: {:nonce => @cc.confirmation_code}
-        expect(response).to be_success
+        expect(response).to be_successful
         expect(assigns[:pseudonym]).to be_new_record
         expect(assigns[:pseudonym].unique_id).to eq 'jt@instructure.com'
         expect(assigns[:pseudonym].account).to eq @account
@@ -356,7 +357,7 @@ describe CommunicationChannelsController do
         expect(@user).to be_creation_pending
 
         get 'confirm', params: {:nonce => @cc.confirmation_code}
-        expect(response).to be_success
+        expect(response).to be_successful
         expect(assigns[:pseudonym]).to be_new_record
         expect(assigns[:pseudonym].unique_id).to eq 'jt@instructure.com'
         expect(assigns[:pseudonym].account).to eq @account
@@ -395,7 +396,7 @@ describe CommunicationChannelsController do
         expect(@enrollment).to be_invited
         @pseudonym = @user.pseudonyms.create!(:unique_id => 'jt@instructure.com')
         get 'confirm', params: {:nonce => @cc.confirmation_code, :enrollment => @enrollment.uuid}
-        expect(response).to be_success
+        expect(response).to be_successful
         expect(assigns[:pseudonym]).to eq @pseudonym
       end
 
@@ -437,7 +438,7 @@ describe CommunicationChannelsController do
         expect(@enrollment).to be_invited
 
         get 'confirm', params: {:nonce => @cc.confirmation_code, :enrollment => @enrollment.uuid}
-        expect(response).to be_success
+        expect(response).to be_successful
         expect(assigns[:pseudonym]).to be_new_record
         expect(assigns[:pseudonym].unique_id).to be_blank
       end
@@ -502,7 +503,7 @@ describe CommunicationChannelsController do
         user_with_pseudonym(:username => 'jt+1@instructure.com', :active_all => 1)
         @logged_user = @user
 
-        @not_logged_user.observers << @logged_user
+        @not_logged_user.linked_observers << @logged_user
 
         user_session(@logged_user, @pseudonym)
 
@@ -516,7 +517,7 @@ describe CommunicationChannelsController do
         user_with_pseudonym(:username => 'jt+1@instructure.com', :active_all => 1)
         @logged_user = @user
 
-        @logged_user.observers << @not_logged_user
+        @logged_user.linked_observers << @not_logged_user
 
         user_session(@logged_user, @pseudonym)
 
@@ -623,7 +624,7 @@ describe CommunicationChannelsController do
         @cc = @user.communication_channels.create!(:path => 'jt@instructure.com')
 
         get 'confirm', params: {:nonce => @cc.confirmation_code, :enrollment => @enrollment.uuid}
-        expect(response).to be_success
+        expect(response).to be_successful
         expect(assigns[:current_user]).to be_nil
         expect(assigns[:pseudonym]).to be_new_record
         expect(assigns[:pseudonym].unique_id).to eq 'jt@instructure.com'
@@ -748,7 +749,7 @@ describe CommunicationChannelsController do
       user_session(@user)
       session[:become_user_id] = u.id
       post 'reset_bounce_count', params: {:user_id => u.id, :id => cc1.id}
-      expect(response).to be_success
+      expect(response).to be_successful
       cc1.reload
       expect(cc1.bounce_count).to eq(0)
     end
@@ -1181,7 +1182,7 @@ describe CommunicationChannelsController do
       Notification.create(:name => 'Confirm Email Communication Channel')
       user_session(@user)
       get 're_send_confirmation', params: {:user_id => @pseudonym.user_id, :id => @cc.id}
-      expect(response).to be_success
+      expect(response).to be_successful
       expect(assigns[:user]).to eql(@user)
       expect(assigns[:cc]).to eql(@cc)
       expect(assigns[:cc].messages_sent).not_to be_nil
@@ -1204,7 +1205,7 @@ describe CommunicationChannelsController do
       user_session(@user)
       user_with_pseudonym(:active_all => true) # new user
       get 're_send_confirmation', params: {:user_id => @pseudonym.user_id, :id => @cc.id}
-      expect(response).to be_success
+      expect(response).to be_successful
     end
 
     it "should re-send enrollment invitation for an invited user" do
@@ -1216,7 +1217,7 @@ describe CommunicationChannelsController do
       Notification.create(:name => 'Enrollment Invitation')
 
       get 're_send_confirmation', params: {:user_id => @pseudonym.user_id, :id => @cc.id, :enrollment_id => @enrollment.id}
-      expect(response).to be_success
+      expect(response).to be_successful
       expect(assigns[:user]).to eql(@user)
       expect(assigns[:enrollment]).to eql(@enrollment)
       expect(assigns[:enrollment].messages_sent).not_to be_nil
@@ -1244,7 +1245,7 @@ describe CommunicationChannelsController do
         end
         Notification.create(:name => 'Enrollment Invitation')
         post 're_send_confirmation', params: {:user_id => enrollment.user_id, :enrollment_id => enrollment.id}
-        expect(response).to be_success
+        expect(response).to be_successful
         expect(assigns[:enrollment]).to eql(enrollment)
         expect(assigns[:enrollment].messages_sent).not_to be_nil
       end
@@ -1281,5 +1282,97 @@ describe CommunicationChannelsController do
     delete 'destroy', params: {:id => @pseudonym.communication_channel.id}
 
     expect(response.code).to eq '401'
+  end
+
+  context 'push token deletion' do
+    let(:sns_response) { double(:[] => {endpoint_arn: 'endpointarn'}, attributes: {endpoint_arn: 'endpointarn'}) }
+    let(:sns_client) { double(create_platform_endpoint: sns_response, get_endpoint_attributes: sns_response) }
+    let(:sns_developer_key_sns_field) { sns_client }
+
+    let(:sns_developer_key) do
+      allow(DeveloperKey).to receive(:sns).and_return(sns_developer_key_sns_field)
+      dk = DeveloperKey.default
+      dk.sns_arn = 'apparn'
+      dk.save!
+      dk
+    end
+
+    let(:sns_access_token) { @user.access_tokens.create!(developer_key: sns_developer_key) }
+    let(:sns_channel) { @user.communication_channels.create(path_type: CommunicationChannel::TYPE_PUSH, path: 'push') }
+
+    it 'should 404 if there is no communication channel', type: :request do
+      status = raw_api_call(:delete, "/api/v1/users/self/communication_channels/push",
+                        {controller: 'communication_channels', action: 'delete_push_token', format: 'json',
+                         push_token: 'notatoken'}, {push_token: 'notatoken'})
+      expect(status).to eq(404)
+    end
+
+    it 'should delete a push_token', type: :request do
+      fake_token = 'insttothemoon'
+      sns_access_token.notification_endpoints.create!(token: fake_token)
+      sns_channel
+
+      json = api_call(:delete, "/api/v1/users/self/communication_channels/push",
+        {controller: 'communication_channels', action: 'delete_push_token', format: 'json',
+        push_token: fake_token}, {push_token: fake_token})
+      expect(json['success']).to eq true
+      endpoints = @user.notification_endpoints.where("lower(token) = ?", fake_token)
+      expect(endpoints.length).to eq 0
+    end
+
+    context 'has a push communication channel' do
+
+      let(:sns_access_token) { @user.access_tokens.create!(developer_key: sns_developer_key) }
+      let(:sns_channel) { @user.communication_channels.create(path_type: CommunicationChannel::TYPE_PUSH, path: 'push') }
+      before(:each) { sns_channel }
+
+      it 'shouldnt error if an endpoint does not exist for the push_token', type: :request do
+        json = api_call(:delete, "/api/v1/users/self/communication_channels/push",
+                      {controller: 'communication_channels', action: 'delete_push_token', format: 'json',
+                       push_token: 'notatoken'}, {push_token: 'notatoken'})
+        expect(json['success']).to eq true
+      end
+
+      context 'has a notification endpoint' do
+
+        let(:fake_token) { 'insttothemoon' }
+        before(:each) { sns_access_token.notification_endpoints.create!(token: fake_token) }
+
+        it 'should delete a push_token', type: :request do
+          json = api_call(:delete, "/api/v1/users/self/communication_channels/push",
+                          {controller: 'communication_channels', action: 'delete_push_token', format: 'json',
+                           push_token: fake_token}, {push_token: fake_token})
+          expect(json['success']).to eq true
+          endpoints = @user.notification_endpoints.where("lower(token) = ?", fake_token)
+          expect(endpoints.length).to eq 0
+        end
+
+        it 'should only delete specified endpoint', type: :request do
+          another_token = 'another'
+          another_endpoint = sns_access_token.notification_endpoints.create!(token: another_token)
+
+          api_call(:delete, "/api/v1/users/self/communication_channels/push",
+                            {controller: 'communication_channels', action: 'delete_push_token', format: 'json',
+                             push_token: fake_token}, {push_token: fake_token})
+          expect(NotificationEndpoint.find(another_endpoint.id).workflow_state).to eq('active')
+          expect(NotificationEndpoint.where(token: fake_token).take.workflow_state).to eq('deleted')
+        end
+
+        it 'should not delete the communication channel', type: :request do
+          api_call(:delete, "/api/v1/users/self/communication_channels/push",
+                          {controller: 'communication_channels', action: 'delete_push_token', format: 'json',
+                           push_token: fake_token}, {push_token: fake_token})
+          expect(CommunicationChannel.where(path: 'push').take).to be_truthy
+        end
+
+        it 'should delete all endpoints for the given token', type: :request do
+          sns_access_token.notification_endpoints.create!(token: fake_token)
+          api_call(:delete, "/api/v1/users/self/communication_channels/push",
+                   {controller: 'communication_channels', action: 'delete_push_token', format: 'json',
+                    push_token: fake_token}, {push_token: fake_token})
+          expect(NotificationEndpoint.where(token: fake_token, workflow_state: 'deleted').length).to eq(2)
+        end
+      end
+    end
   end
 end

@@ -45,9 +45,16 @@ class MasterCourses::MasterMigration < ActiveRecord::Base
     master_template.class.transaction do
       master_template.lock!
       if master_template.active_migration_running?
-        raise MigrationRunningError.new("cannot start new migration while another one is running")
+        if opts[:retry_later]
+          self.send_later_enqueue_args(:start_new_migration!,
+            {:singleton => "retry_start_master_migration_#{master_template.global_id}",
+              :run_at => 10.minutes.from_now, :max_attempts => 1},
+            master_template, user, opts)
+        else
+          raise MigrationRunningError.new("cannot start new migration while another one is running")
+        end
       else
-        new_migration = master_template.master_migrations.create!({:user => user}.merge(opts))
+        new_migration = master_template.master_migrations.create!({:user => user}.merge(opts.except(:retry_later)))
         master_template.active_migration = new_migration
         master_template.save!
         new_migration.queue_export_job
@@ -64,9 +71,20 @@ class MasterCourses::MasterMigration < ActiveRecord::Base
     Setting.get('master_course_export_job_expiration_hours', '24').to_i
   end
 
+  def in_running_state?
+    %w{created queued exporting imports_queued}.include?(self.workflow_state)
+  end
+
   def still_running?
     # if something catastrophic happens, just give up after 24 hours
-    %w{created queued exporting imports_queued}.include?(self.workflow_state) && self.created_at > self.hours_until_expire.hours.ago
+    in_running_state? && self.created_at > self.hours_until_expire.hours.ago
+  end
+
+  def expire_if_necessary!
+    if in_running_state? && self.created_at < self.hours_until_expire.hours.ago
+      self.workflow_state = (self.workflow_state == 'imports_queued') ? 'imports_failed' : 'exports_failed'
+      self.save!
+    end
   end
 
   def queue_export_job
@@ -163,6 +181,7 @@ class MasterCourses::MasterMigration < ActiveRecord::Base
     ce.settings[:master_migration_type] = type
     ce.settings[:master_migration_id] = self.id # so we can find on the import side when we copy attachments
     ce.settings[:primary_master_migration] = is_primary
+    ce.settings[:selected_content] = selected_content(type)
     ce.user = self.user
     ce.save!
     ce.master_migration = self # don't need to reload
@@ -171,8 +190,22 @@ class MasterCourses::MasterMigration < ActiveRecord::Base
       ce.settings[:referenced_file_migration_ids] = ce.referenced_files.values
       ce.save!
     end
-    detect_updated_attachments(type) if ce.exported_for_course_copy? && is_primary
+    if ce.exported_for_course_copy? && is_primary
+      detect_updated_attachments(type)
+      detect_updated_syllabus(type, ce)
+    end
     ce
+  end
+
+  def selected_content(type)
+    {}.tap do |h|
+      h[:all_course_settings] = if migration_settings.has_key?(:copy_settings)
+        migration_settings[:copy_settings]
+      else
+        type == :full
+      end
+      h[:syllabus_body] = type == :full || master_template.course.syllabus_updated_at&.>(last_export_at)
+    end
   end
 
   def last_export_at
@@ -181,7 +214,12 @@ class MasterCourses::MasterMigration < ActiveRecord::Base
 
   def export_object?(obj)
     return false unless obj
-    last_export_at.nil? || obj.updated_at.nil? || obj.updated_at >= last_export_at
+    return true if last_export_at.nil?
+    if obj.is_a?(LearningOutcome) && obj.context_type == "Account"
+      link = self.master_template.course.learning_outcome_links.polymorphic_where(:content => obj).first
+      obj = link if link # export the outcome if it's a new link
+    end
+    obj.updated_at.nil? || obj.updated_at >= last_export_at
   end
 
   def detect_updated_attachments(type)
@@ -192,6 +230,11 @@ class MasterCourses::MasterMigration < ActiveRecord::Base
       master_template.ensure_tag_on_export(att)
       add_exported_asset(att)
     end
+  end
+
+  def detect_updated_syllabus(type, content_export)
+    selected_content = content_export.settings[:selected_content]
+    @updates['syllabus'] = true if @updates && selected_content && selected_content[:syllabus_body]
   end
 
   def add_exported_asset(asset)

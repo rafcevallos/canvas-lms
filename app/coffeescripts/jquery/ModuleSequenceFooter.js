@@ -90,7 +90,7 @@ export default class ModuleSequenceFooter {
 
   iconClasses = {
     ModuleItem: 'icon-module',
-    File: 'icon-download',
+    File: 'icon-paperclip',
     Page: 'icon-document',
     Discussion: 'icon-discussion',
     Assignment: 'icon-assignment',
@@ -253,7 +253,9 @@ export default class ModuleSequenceFooter {
 
   awaitingPathProgress () {
     const masteryPath = this.item.mastery_path
-    return masteryPath && (masteryPath.awaiting_choice || masteryPath.locked || masteryPath.still_processing)
+    if (masteryPath && masteryPath.is_student) {
+      return masteryPath.awaiting_choice || masteryPath.locked || masteryPath.still_processing
+    }
   }
 }
 

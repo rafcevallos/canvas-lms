@@ -42,13 +42,29 @@ module Submittable
     def visible_ids_by_user(opts)
       # pluck id, assignment_id, and user_id from items joined with the SQL view
       plucked_visibilities = pluck_visibilities(opts).group_by{|_, _, user_id| user_id}
-      # items without an assignment are visible to all, so add them into every students hash at the end
-      ids_visible_to_all = self.without_assignment_in_course(opts[:course_id]).pluck(:id)
+      # Assignment-less items are *normally* visible to all -- the exception is
+      # section-specific discussions, so here get the ones visible to everyone in the
+      # course, and below get the ones that are visible to the right section.
+      ids_visible_to_all = if opts[:item_type] == :discussion
+        self.without_assignment_in_course(opts[:course_id]).where(:is_section_specific => false).pluck(:id)
+      else
+        self.without_assignment_in_course(opts[:course_id]).pluck(:id)
+      end
+
+      # Now get the section-specific discussions that are in the proper sections.
+      ids_visible_to_sections = if opts[:item_type] == :discussion
+        user_sections = Enrollment.active.where(
+          :course_id => opts[:course_id], :user_id => opts[:user_id]).pluck(:course_section_id)
+        DiscussionTopicSectionVisibility.where(:course_section_id => user_sections).pluck(:discussion_topic_id).uniq
+      else
+        []
+      end
+
       # build map of user_ids to array of item ids {1 => [2,3,4], 2 => [2,4]}
       opts[:user_id].reduce({}) do |vis_hash, student_id|
         vis_hash[student_id] = begin
           ids_from_pluck = (plucked_visibilities[student_id] || []).map{|id, _ ,_| id}
-          ids_from_pluck.concat(ids_visible_to_all)
+          ids_from_pluck.concat(ids_visible_to_all).concat(ids_visible_to_sections)
         end
         vis_hash
       end
@@ -103,7 +119,11 @@ module Submittable
 
   def update_assignment
     if self.deleted?
-      self.assignment.destroy if self.for_assignment? && !self.assignment.deleted?
+      if self.for_assignment? && !self.assignment.deleted?
+        self.class.connection.after_transaction_commit do
+          self.assignment.destroy
+        end
+      end
     else
       if !self.assignment_id && @old_assignment_id
         self.context_module_tags.each(&:confirm_valid_module_requirements)
@@ -115,9 +135,11 @@ module Submittable
           submission_types: 'wiki_page'
         ).update_all(workflow_state: 'deleted', updated_at: Time.now.utc)
       elsif self.assignment && @saved_by != :assignment
-        self.clear_changes_information # needed to prevent an infinite loop in rails 4.2
-        self.sync_assignment
-        self.assignment.save
+        # let the stack unwind before we sync this, so that we're not nesting callbacks
+        self.class.connection.after_transaction_commit do
+          self.sync_assignment
+          self.assignment.save
+        end
       end
     end
   end

@@ -99,6 +99,7 @@ module Importers
       end
 
       type = item.is_a?(Announcement) ? :announcement : :discussion_topic
+      item.locked = options[:locked] if !options[:locked].nil? && type == :announcement
       if options.message
         item.message = migration.convert_html(options.message, type, options[:migration_id], :message)
       else
@@ -169,7 +170,7 @@ module Importers
     class DiscussionTopicOptions
       attr_reader :options
 
-      BOOLEAN_KEYS = [:pinned, :require_initial_post]
+      BOOLEAN_KEYS = [:pinned, :require_initial_post, :locked]
 
       def initialize(options = {})
         @options = options.with_indifferent_access

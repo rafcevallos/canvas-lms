@@ -154,7 +154,7 @@
           <% if assignment_presenter.is_unread? %>
             <div class="unread-grade">&nbsp;</div>
           <% end %>
-          <% if assignment_presenter.is_assignment? %>
+          <% if assignment_presenter.show_submission_details_link? %>
             <a href="<%= context_url(@context, :context_assignment_submission_url, assignment, @presenter.student_id) %>"><%= assignment.title %></a>
           <% else %>
             <%= assignment.title %>
@@ -240,6 +240,7 @@
               </span>
               <span class="submission_status">
                 <%= submission.blank? ? 'none' : submission.workflow_state %>
+              </span>
               <span class="assignment_group_id"><%= assignment.assignment_group_id rescue "" %></span>
               <span class="assignment_id"><%= assignment.id.to_s %></span>
               <span class="group_weight"><%= assignment.group_weight rescue "" %></span>
@@ -458,13 +459,13 @@
                       <% end %>
                       <td colspan="<%= assignment_presenter.deduction_present? ? 1 : 3 %>">
                         <% graph = assignment_presenter.graph %>
-                        <div style="cursor: pointer; float: right; height: 30px; margin-left: 20px; width: 160px; position: relative; margin-right: 30px;" aria-hidden="true" title="<%= graph.title %>">
-                          <div class="grade-summary-graph-component" style="height: 10px; margin: 5px 0px; border-width: 2px; border-right-width: 0;">&nbsp;</div>
+                        <div style="cursor: pointer; float: <%= direction('right') %>; height: 30px; margin-<%= direction('left') %>: 20px; width: 160px; position: relative; margin-<%= direction('right') %>: 30px;" aria-hidden="true" title="<%= graph.title %>">
+                          <div class="grade-summary-graph-component" style="height: 10px; margin: 5px 0px; border-width: 2px; border-<%= direction('right') %>-width: 0;">&nbsp;</div>
                           <div class="grade-summary-graph-component" style="width: <%= graph.low_width %>px; height: 0px; margin-top: 10px; border-bottom-width: 2px;">&nbsp;</div>
                           <div class="grade-summary-graph-component" style="left: <%= graph.high_left %>px; width: <%= graph.high_width %>px; height: 0px; margin-top: 10px; border-bottom-width: 2px;">&nbsp;</div>
-                          <div class="grade-summary-graph-component" style="left: <%= graph.low_width %>px; width: <%= graph.mean_low_width %>px; height: 20px; border-width: 2px; border-top-left-radius: 3px; border-bottom-left-radius: 3px; border-right-width: 0; background: #fff;">&nbsp;</div>
+                          <div class="grade-summary-graph-component" style="left: <%= graph.low_width %>px; width: <%= graph.mean_low_width %>px; height: 20px; border-width: 2px; border-top-left-radius: 3px; border-bottom-left-radius: 3px; border-<%= direction('right') %>-width: 0; background: #fff;">&nbsp;</div>
                           <div class="grade-summary-graph-component" style="left: <%= graph.mean_left%>px; width: <%= graph.mean_high_width%>px; height: 20px; border-width: 2px; border-top-right-radius: 3px; border-bottom-right-radius: 3px; background: #fff;">&nbsp;</div>
-                          <div class="grade-summary-graph-component" style="left: <%= graph.max_left %>px; height: 10px; margin: 5px 0px; border-width: 2px; border-left-width: 0;">&nbsp;</div>
+                          <div class="grade-summary-graph-component" style="left: <%= graph.max_left %>px; height: 10px; margin: 5px 0px; border-width: 2px; border-<%= direction('left') %>-width: 0;">&nbsp;</div>
                           <% if submission && submission.score %>
                             <div class="grade-summary-graph-component" style="top: 5px; height: 10px; width: 10px; left: <%= graph.score_left %>px; border: 2px solid #248; background: #abd; border-radius: 3px;" title="<%= before_label(:your_score, "Your Score") %>
                               <%= t(:submission_score, "*%{score}* out of %{possible}", :wrapper => '\1', :score => n(submission.score), :possible => n(round_if_whole(assignment.points_possible))) %>">&nbsp;
@@ -504,7 +505,7 @@
                       <% else %>
                         <span style="white-space: pre-wrap;"><%= comment.comment %></span>
                       <% end %>
-                      <div style="text-align: right; font-size: 0.8em; margin-right: 10px; clear: both;">
+                      <div style="text-align: <%= direction('right') %>; font-size: 0.8em; margin-<%= direction('right') %>: 10px; clear: both;">
                         <% comment.attachments.each do |attachment| %>
                           <div>
                             <a href="<%= context_url(@context, :context_assignment_submission_url, submission.assignment_id, submission.user_id, :download => attachment.id, :comment_id => comment.id) %>"><%= image_tag "file.png", :style => "height: 12px;", :alt => "" %><%= t('links.download', "Download %{attachment}", :attachment => attachment.display_name) %></a>
@@ -528,7 +529,7 @@
         <% if assignment_presenter.has_rubric_assessments? %>
           <td colspan="6">
             <% assignment_presenter.rubric_assessments.each do |assessment| %>
-              <div class="assessor" style="text-align: right; margin-bottom: 5px">
+              <div class="assessor" style="text-align: <%= direction('right') %>; margin-bottom: 5px">
                 <% if assignment.anonymous_peer_reviews %>
                   <%= t("Anonymous User") %>
                 <% else %>
@@ -536,7 +537,18 @@
                 <% end %>
               </div>
               <div class="rubric-toggle"><a href="#" data-aria="rubric_<%= assignment.id %>" class="screenreader-toggle pull-left"><%= t(:close_rubric, 'Close Rubric') %></a></div>
-              <%= render :partial => "shared/rubric", :object => assessment.rubric, :locals => { :assessment => assessment } %>
+              <% if @domain_root_account.feature_enabled?(:non_scoring_rubrics)%>
+                <div
+                  class="react_rubric_container rubric <%= "for_grading" if assessment.rubric_association.try(:use_for_grading) %>"
+                  id="<%= assessment.rubric ? "rubric_#{assessment.rubric&.id}" : "default_rubric" %>"
+                  data-rubric-id="<%= assessment.rubric ? assessment.rubric.id : "default" %>"
+                  data-rubric-assessment-id="<%= assessment ? assessment.id : "none" %>"
+                  tabindex="0"
+                >
+              <% else %>
+                <%= render :partial => "shared/rubric", :object => assessment.rubric, :locals => { :assessment => assessment } %>
+              <% end %>
+              </div>
             <% end %>
           </td>
         <% end %>

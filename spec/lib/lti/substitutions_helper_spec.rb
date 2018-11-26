@@ -203,6 +203,14 @@ module Lti
         expect(subject.account_enrollments).to eq [enrollment]
       end
 
+      it 'does not return deleted account enrollments' do
+        set_up_persistance!
+        enrollment = account.account_users.create!(:user => user)
+        enrollment.destroy
+
+        expect(subject.account_enrollments).to eq []
+      end
+
       it 'returns enrollments in an account chain for a user' do
         set_up_persistance!
         enrollment = root_account.account_users.create!(:user => user)
@@ -267,6 +275,42 @@ module Lti
         set_up_persistance!
         student_in_course(user: user, course: course, active_enrollment: true).conclude
         expect(subject.concluded_lis_roles).to eq 'Learner'
+      end
+    end
+
+    describe '#current_canvas_roles_lis_v2' do
+      it 'returns the LIS V2 role names' do
+        set_up_persistance!
+
+        teacher_in_course(user: user, course: course, active_enrollment: true)
+        course_with_designer(user: user, course: course, active_enrollment: true)
+        account_admin_user(user: user, account: account)
+        roles = subject.current_canvas_roles_lis_v2
+
+        expect(roles.split(',')).to match_array [
+          "http://purl.imsglobal.org/vocab/lis/v2/membership#ContentDeveloper",
+          "http://purl.imsglobal.org/vocab/lis/v2/membership#Instructor",
+          "http://purl.imsglobal.org/vocab/lis/v2/institution/person#Administrator"
+        ]
+      end
+
+      it 'does not include concluded roles' do
+        set_up_persistance!
+        student_in_course(user: user, course: course, active_enrollment: true).conclude
+        teacher_in_course(user: user, course: course, active_enrollment: true)
+        roles = subject.current_canvas_roles_lis_v2
+
+        expect(roles).to eq 'http://purl.imsglobal.org/vocab/lis/v2/membership#Instructor'
+      end
+
+      it 'does not include roles from other contexts' do
+        set_up_persistance!
+        course_two = course_model
+        student_in_course(user: user, course: course, active_enrollment: true)
+        teacher_in_course(user: user, course: course_two, active_enrollment: true)
+        roles = subject.current_canvas_roles_lis_v2
+
+        expect(roles).to eq 'http://purl.imsglobal.org/vocab/lis/v2/membership#Learner'
       end
     end
 

@@ -560,7 +560,52 @@ describe ConversationsController, type: :request do
         json = api_call(:post, "/api/v1/conversations",
                 { :controller => 'conversations', :action => 'create', :format => 'json' },
                 { :recipients => [@bob.id], :body => "test", :context_code => "course_#{@course.id}" })
-        expect(conversation(@bob).conversation.context).to eql(@course)
+        expect(@bob.conversations.last.conversation.context).to eql(@course)
+      end
+
+      it "should not re-use a private conversation with a different explicit context" do
+        course1 = @course
+        course2 = course_with_teacher(:user => @me, :active_all => true).course
+        course_with_student(:course => course2, :user => @bob, :active_all => true)
+
+        json = api_call(:post, "/api/v1/conversations",
+          { :controller => 'conversations', :action => 'create', :format => 'json' },
+          { :recipients => [@bob.id], :body => "test", :context_code => "course_#{course1.id}" })
+        conv1 = Conversation.find(json.first["id"])
+        expect(conv1.context).to eql(course1)
+
+        json2 = api_call(:post, "/api/v1/conversations",
+          { :controller => 'conversations', :action => 'create', :format => 'json' },
+          { :recipients => [@bob.id], :body => "test", :context_code => "course_#{course2.id}" })
+        conv2 = Conversation.find(json2.first["id"])
+        expect(conv2.context).to eql(course2)
+      end
+
+      it "should re-use a private conversation with an old contextless private hash if the original context matches" do
+        course1 = @course
+        course2 = course_with_teacher(:user => @me, :active_all => true).course
+        course_with_student(:course => course2, :user => @bob, :active_all => true)
+
+        json = api_call(:post, "/api/v1/conversations",
+          { :controller => 'conversations', :action => 'create', :format => 'json' },
+          { :recipients => [@bob.id], :body => "test", :context_code => "course_#{course1.id}" })
+        conv1 = Conversation.find(json.first["id"])
+        expect(conv1.context).to eql(course1)
+
+        # revert it to the old format
+        old_hash = Conversation.private_hash_for(conv1.conversation_participants.pluck(:user_id))
+        ConversationParticipant.where(:conversation_id => conv1).update_all(:private_hash => old_hash)
+        Conversation.where(:id => conv1).update_all(:private_hash => old_hash)
+
+        json2 = api_call(:post, "/api/v1/conversations",
+          { :controller => 'conversations', :action => 'create', :format => 'json' },
+          { :recipients => [@bob.id], :body => "test", :context_code => "course_#{course1.id}" })
+        expect(json2.first["id"]).to eq conv1.id # should reuse the conversation
+
+        json3 = api_call(:post, "/api/v1/conversations",
+          { :controller => 'conversations', :action => 'create', :format => 'json' },
+          { :recipients => [@bob.id], :body => "test", :context_code => "course_#{course2.id}" })
+        expect(json3.first["id"]).to_not eq conv1.id # should make a new one
       end
 
       describe "context is an account for admins validation" do
@@ -589,6 +634,24 @@ describe ConversationsController, type: :request do
           expect(conv.context).to eq @course
         end
 
+        # Otherwise, students can't reply to admins because admins are not in the course
+        # context
+        it "should use account context if messages are coming from an admin through a course" do
+          account_admin_user active_all: true
+          json = api_call(:post, "/api/v1/conversations",
+                  { :controller => 'conversations', :action => 'create', :format => 'json'},
+                  { :recipients => [@bob.id], :body => "test", :context_code => @course.asset_string })
+          expect(json.first["context_code"]).to eq "account_#{Account.default.id}"
+        end
+
+        it "should still use course context if messages are NOT coming from an admin through a course " do
+          conversation = conversation(@bob, :context_type => "Course", :context_id => @course.id)
+          json = api_call(:get, "/api/v1/conversations/#{conversation.conversation_id}",
+                          { :controller => 'conversations', :action => 'show', :id => conversation.conversation_id.to_s,
+                            :format => 'json',  })
+          expect(json["context_code"]).to eq @course.asset_string
+        end
+
         it "should always have the right tags when sending a bulk message in course context" do
           other_course = Account.default.courses.create!(:workflow_state => 'available')
           other_course.enroll_teacher(@user).accept!
@@ -612,7 +675,7 @@ describe ConversationsController, type: :request do
             { :controller => 'conversations', :action => 'create', :format => 'json' },
             { :recipients => [@user.id], :body => "hello, me", :context_code => @course.asset_string }
           )
-          expect(response).to be_success
+          expect(response).to be_successful
           expect(json[0]['messages'][0]['participating_user_ids']).to eq([@user.id])
         end
 
@@ -771,14 +834,13 @@ describe ConversationsController, type: :request do
                   { :controller => 'conversations', :action => 'create', :format => 'json' },
                   { :recipients => [@bob.id, @joe.id, @billy.id], :body => "test", :context_code => "course_#{@course.id}" })
           expect(json.size).to eql 3
-          expect(json.map{ |c| c['id'] }.sort).to eql @me.all_conversations.map(&:conversation_id).sort
 
           batch = ConversationBatch.first
           expect(batch).not_to be_nil
           expect(batch).to be_sent
 
-          [@me, @bob].each {|u| expect(u.conversations.first.conversation.context).to be_nil} # an existing conversation does not get a context
-          [@billy, @joe].each {|u| expect(u.conversations.first.conversation.context).to eql(@course)}
+          expect(@me.all_conversations.last.conversation.context).to eq @course
+          [@bob, @billy, @joe].each {|u| expect(u.conversations.first.conversation.context).to eql(@course)}
         end
 
         it "constraints the length of the subject of a conversation batch" do
@@ -818,8 +880,8 @@ describe ConversationsController, type: :request do
           expect(batch).to be_created
           batch.deliver
 
-         [@me, @bob].each {|u| expect(u.conversations.first.conversation.context).to be_nil} # an existing conversation does not get a context
-          [@billy, @joe].each {|u| expect(u.conversations.first.conversation.context).to eql(@course)}
+          expect(@me.all_conversations.last.conversation.context).to eq @course
+          [@bob, @billy, @joe].each {|u| expect(u.conversations.first.conversation.context).to eql(@course)}
         end
       end
 
@@ -883,6 +945,7 @@ describe ConversationsController, type: :request do
                     'content-type' => 'image/png',
                     'display_name' => 'test my file? hai!&.png',
                     'id' => attachment.id,
+                    'uuid' => attachment.uuid,
                     'folder_id' => attachment.folder_id,
                     'size' => attachment.size,
                     'unlock_at' => nil,
@@ -894,7 +957,7 @@ describe ConversationsController, type: :request do
                     'created_at' => attachment.created_at.as_json,
                     'updated_at' => attachment.updated_at.as_json,
                     'modified_at' => attachment.modified_at.as_json,
-                    'thumbnail_url' => attachment.thumbnail_url,
+                    'thumbnail_url' => thumbnail_image_url(attachment, attachment.uuid, host: 'www.example.com'),
                     'mime_class' => attachment.mime_class,
                     'media_entry_id' => attachment.media_entry_id }], "participating_user_ids" => [@me.id, @bob.id].sort
                   }
@@ -916,12 +979,12 @@ describe ConversationsController, type: :request do
 
             @message = conversation(@me, :sender => @bob).messages.first
           end
-
           json = api_call(:post, "/api/v1/conversations/#{@conversation.conversation_id}/add_message",
             { :controller => 'conversations', :action => 'add_message', :id => @conversation.conversation_id.to_s, :format => 'json' },
             { :body => "wut wut", :included_messages => [@message.id]})
 
           expect(json['last_message']).to eq "wut wut"
+          expect(@conversation.reload.message_count).to eq 2 # should not double-update
         end
       end
 
@@ -1033,6 +1096,26 @@ describe ConversationsController, type: :request do
                   :group_conversation => "true", :bulk_message => "true" })
         expect(json.size).to eql 1
       end
+
+      context "cross-shard creation" do
+        specs_require_sharding
+
+        it "should create the conversation on the context's shard" do
+          @shard1.activate do
+            @other_account = Account.create
+            course_with_teacher(:active_all => true, :account => @other_account, :user => @me)
+            @other_course = @course
+            @other_student = user_with_pseudonym(:active_all => true, :account => @other_account)
+            @other_course.enroll_student(@other_student, :enrollment_state => "active")
+          end
+
+          @user = @me
+          json = api_call(:post, "/api/v1/conversations",
+            { :controller => 'conversations', :action => 'create', :format => 'json' },
+            { :recipients => [@other_student.id], :body => "test", :context_code => "course_#{@other_course.id}" })
+          expect(@other_student.conversations.last.conversation.shard).to eq @shard1
+        end
+      end
     end
   end
 
@@ -1105,6 +1188,7 @@ describe ConversationsController, type: :request do
                 "content-type" => "unknown/unknown",
                 "display_name" => "test.txt",
                 "id" => attachment.id,
+                "uuid" => attachment.uuid,
                 "folder_id" => attachment.folder_id,
                 "size" => attachment.size,
                 'unlock_at' => nil,
@@ -1115,7 +1199,7 @@ describe ConversationsController, type: :request do
                 'hidden_for_user' => false,
                 'created_at' => attachment.created_at.as_json,
                 'updated_at' => attachment.updated_at.as_json,
-                'thumbnail_url' => attachment.thumbnail_url,
+                'thumbnail_url' => nil,
                 'modified_at' => attachment.modified_at.as_json,
                 'mime_class' => attachment.mime_class,
                 'media_entry_id' => attachment.media_entry_id
@@ -1369,7 +1453,7 @@ describe ConversationsController, type: :request do
     it "should return an error if trying to add more participants than the maximum group size on add_message" do
       conversation = conversation(@bob, private: false)
 
-      Setting.set("max_group_conversation_size", 2)
+      Setting.set("max_group_conversation_size", 1)
 
       json = api_call(:post, "/api/v1/conversations/#{conversation.conversation_id}/add_message",
         { :controller => 'conversations', :action => 'add_message', :id => conversation.conversation_id.to_s, :format => 'json' },
@@ -1627,7 +1711,7 @@ describe ConversationsController, type: :request do
     end
 
     it "should return an error if trying to add more participants than the maximum group size on add_recipients" do
-      conversation = conversation(@bob, @billy)
+      conversation = conversation(@bob, @billy, @joe)
 
       Setting.set("max_group_conversation_size", 2)
 

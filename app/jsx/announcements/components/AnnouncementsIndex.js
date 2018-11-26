@@ -17,24 +17,26 @@
  */
 
 import I18n from 'i18n!announcements_v2'
-import React, { Component } from 'react'
-import { func, bool, number } from 'prop-types'
-import { connect } from 'react-redux'
-import { bindActionCreators } from 'redux'
+import React, {Component} from 'react'
+import {func, bool, number} from 'prop-types'
+import {connect} from 'react-redux'
+import {bindActionCreators} from 'redux'
 
-import Spinner from '@instructure/ui-core/lib/components/Spinner'
-import Container from '@instructure/ui-core/lib/components/Container'
-import ScreenReaderContent from '@instructure/ui-core/lib/components/ScreenReaderContent'
-import Heading from '@instructure/ui-core/lib/components/Heading'
-import Text from '@instructure/ui-core/lib/components/Text'
-import Pagination, { PaginationButton } from '@instructure/ui-core/lib/components/Pagination'
+import Spinner from '@instructure/ui-elements/lib/components/Spinner'
+import View from '@instructure/ui-layout/lib/components/View'
+import ScreenReaderContent from '@instructure/ui-a11y/lib/components/ScreenReaderContent'
+import Heading from '@instructure/ui-elements/lib/components/Heading'
+import Text from '@instructure/ui-elements/lib/components/Text'
+import Pagination, {PaginationButton} from '@instructure/ui-pagination/lib/components/Pagination'
 
 import AnnouncementRow from '../../shared/components/AnnouncementRow'
-import { ConnectedIndexHeader } from './IndexHeader'
+import {ConnectedIndexHeader} from './IndexHeader'
+import AnnouncementEmptyState from './AnnouncementEmptyState'
+import {showConfirmDelete} from './ConfirmDeleteModal'
 
 import select from '../../shared/select'
-import { selectPaginationState } from '../../shared/reduxPagination'
-import { announcementList } from '../../shared/proptypes/announcement'
+import {selectPaginationState} from '../../shared/reduxPagination'
+import {announcementList} from '../../shared/proptypes/announcement'
 import masterCourseDataShape from '../../shared/proptypes/masterCourseData'
 import actions from '../actions'
 import propTypes from '../propTypes'
@@ -46,31 +48,68 @@ export default class AnnouncementsIndex extends Component {
     announcementsLastPage: number.isRequired,
     isLoadingAnnouncements: bool.isRequired,
     hasLoadedAnnouncements: bool.isRequired,
+    isCourseContext: bool.isRequired,
     getAnnouncements: func.isRequired,
+    announcementSelectionChangeStart: func.isRequired,
     permissions: propTypes.permissions.isRequired,
     masterCourseData: masterCourseDataShape,
+    deleteAnnouncements: func.isRequired,
+    toggleAnnouncementsLock: func.isRequired,
+    announcementsLocked: bool.isRequired
   }
 
   static defaultProps = {
-    masterCourseData: null,
+    masterCourseData: null
   }
 
-  componentDidMount () {
+  componentDidMount() {
     if (!this.props.hasLoadedAnnouncements) {
       this.props.getAnnouncements()
     }
   }
 
-  selectPage (page) {
-    return () => this.props.getAnnouncements({ page, select: true })
+  onManageAnnouncement = (e, {action, id, lock}) => {
+    switch (action) {
+      case 'delete':
+        showConfirmDelete({
+          selectedCount: 1,
+          modalRef: modal => {
+            this.deleteModal = modal
+          },
+          onConfirm: () => {
+            this.props.deleteAnnouncements(id)
+            if (this.searchInput) this.searchInput.focus()
+          }
+        })
+        break
+      case 'lock':
+        this.props.toggleAnnouncementsLock(id, lock)
+        break
+      default:
+        break
+    }
   }
 
-  renderSpinner (condition, title) {
+  selectPage(page) {
+    return () => this.props.getAnnouncements({page, select: true})
+  }
+
+  renderEmptyAnnouncements() {
+    if (this.props.hasLoadedAnnouncements && !this.props.announcements.length) {
+      return <AnnouncementEmptyState canCreate={this.props.permissions.create} />
+    } else {
+      return null
+    }
+  }
+
+  renderSpinner(condition, title) {
     if (condition) {
       return (
         <div style={{textAlign: 'center'}}>
           <Spinner size="small" title={title} />
-          <Text size="small" as="p">{title}</Text>
+          <Text size="small" as="p">
+            {title}
+          </Text>
         </div>
       )
     } else {
@@ -78,69 +117,103 @@ export default class AnnouncementsIndex extends Component {
     }
   }
 
-  renderAnnouncements () {
-    if (this.props.hasLoadedAnnouncements) {
-      return this.props.announcements.map(announcement => (
-        <AnnouncementRow
-          key={announcement.id}
-          announcement={announcement}
-          canManage={this.props.permissions.manage_content}
-          masterCourseData={this.props.masterCourseData}
-        />
-      ))
+  renderAnnouncements() {
+    if (this.props.hasLoadedAnnouncements && this.props.announcements.length) {
+      return (
+        <View margin="medium">
+          <ScreenReaderContent>
+            <Heading level="h2">{I18n.t('Announcements List')}</Heading>
+          </ScreenReaderContent>
+          {this.props.announcements.map(announcement => (
+            <AnnouncementRow
+              key={announcement.id}
+              announcement={announcement}
+              canManage={announcement.permissions.delete}
+              masterCourseData={this.props.masterCourseData}
+              onSelectedChanged={this.props.announcementSelectionChangeStart}
+              onManageMenuSelect={this.onManageAnnouncement}
+              canHaveSections={this.props.isCourseContext}
+              announcementsLocked={this.props.announcementsLocked}
+            />
+          ))}
+        </View>
+      )
     } else {
       return null
     }
   }
 
-  renderPageButton (page) {
+  renderPageButton(page) {
     return (
       <PaginationButton
         key={page}
         onClick={this.selectPage(page)}
-        current={page === this.props.announcementsPage}>
-          {page}
+        current={page === this.props.announcementsPage}
+      >
+        <ScreenReaderContent>{I18n.t('Page %{pageNum}', {pageNum: page})}</ScreenReaderContent>
+        <span aria-hidden="true">{page}</span>
       </PaginationButton>
     )
   }
 
-  renderPagination () {
-    const pages = Array.from(Array(this.props.announcementsLastPage))
-      .map((_, i) => this.renderPageButton(i + 1))
-
-    return (
-      <Pagination
-        variant="compact"
-        labelNext={I18n.t('Next Announcements Page')}
-        labelPrev={I18n.t('Previous Announcements Page')}
-      >
-        {pages}
-      </Pagination>
+  renderPagination() {
+    const pages = Array.from(Array(this.props.announcementsLastPage)).map((_, i) =>
+      this.renderPageButton(i + 1)
     )
+    if (pages.length > 1 && !this.props.isLoadingAnnouncements) {
+      return (
+        <Pagination
+          variant="compact"
+          labelNext={I18n.t('Next Announcements Page')}
+          labelPrev={I18n.t('Previous Announcements Page')}
+        >
+          {pages}
+        </Pagination>
+      )
+    }
+    return null
   }
 
-  render () {
+  render() {
     return (
       <div className="announcements-v2__wrapper">
         <ScreenReaderContent>
           <Heading level="h1">{I18n.t('Announcements')}</Heading>
         </ScreenReaderContent>
-        {this.props.permissions.manage_content && <ConnectedIndexHeader />}
+        <ConnectedIndexHeader
+          searchInputRef={c => {
+            this.searchInput = c
+          }}
+        />
         {this.renderSpinner(this.props.isLoadingAnnouncements, I18n.t('Loading Announcements'))}
-        <Container margin="medium">
-          <ScreenReaderContent>
-            <Heading level="h2">{I18n.t('Announcements List')}</Heading>
-          </ScreenReaderContent>
-          {this.renderAnnouncements()}
-        </Container>
+        {this.renderEmptyAnnouncements()}
+        {this.renderAnnouncements()}
         {this.renderPagination()}
       </div>
     )
   }
 }
 
-const connectState = state => Object.assign({
-  // props derived from state here
-}, selectPaginationState(state, 'announcements'), select(state, ['permissions', 'masterCourseData']))
-const connectActions = dispatch => bindActionCreators(select(actions, ['getAnnouncements']), dispatch)
-export const ConnectedAnnouncementsIndex = connect(connectState, connectActions)(AnnouncementsIndex)
+const connectState = state =>
+  Object.assign(
+    {
+      isCourseContext: state.contextType === 'course'
+    },
+    selectPaginationState(state, 'announcements'),
+    select(state, ['permissions', 'masterCourseData', 'announcementsLocked'])
+  )
+const connectActions = dispatch =>
+  bindActionCreators(
+    select(actions, [
+      'getAnnouncements',
+      'announcementSelectionChangeStart',
+      'deleteAnnouncements',
+      'toggleAnnouncementsLock'
+    ]),
+    dispatch
+  )
+
+export const ConnectedAnnouncementsIndex = connect(
+  connectState,
+  connectActions
+)(AnnouncementsIndex)

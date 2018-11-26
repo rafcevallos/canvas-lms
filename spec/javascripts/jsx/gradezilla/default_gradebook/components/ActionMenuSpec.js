@@ -17,7 +17,7 @@
  */
 
 import React from 'react'
-import {mount} from 'enzyme'
+import {mount} from 'old-enzyme-2.x-you-need-to-upgrade-this-spec-to-enzyme-3.x-by-importing-just-enzyme'
 import $ from 'jquery'
 import PostGradesApp from 'jsx/gradezilla/SISGradePassback/PostGradesApp'
 import GradebookExportManager from 'jsx/gradezilla/shared/GradebookExportManager'
@@ -47,7 +47,9 @@ const workingMenuProps = () => (
 
     publishGradesToSis: {
       isEnabled: false
-    }
+    },
+
+    gradingPeriodId: "1234"
   }
 );
 const previousExportProps = () => (
@@ -215,7 +217,7 @@ QUnit.module('ActionMenu - handleExport', {
 
   setup () {
     this.expectedPreviousExport = {
-      attachmentUrl: 'http://attachmentUrl&download_frd=1',
+      attachmentUrl: 'http://attachmentUrl',
       label: 'New Export (Jan 20, 2009 at 5pm)'
     };
     this.successfulExport = {
@@ -224,8 +226,8 @@ QUnit.module('ActionMenu - handleExport', {
     };
 
     this.spies = {};
-    this.spies.gotoUrl = this.stub(ActionMenu, 'gotoUrl');
-    this.spies.startExport = this.stub(GradebookExportManager.prototype, 'startExport');
+    this.spies.gotoUrl = sandbox.stub(ActionMenu, 'gotoUrl');
+    this.spies.startExport = sandbox.stub(GradebookExportManager.prototype, 'startExport');
 
     this.wrapper = mount(<ActionMenu {...workingMenuProps()} />, { attachTo: document.querySelector('#fixture')});
 
@@ -244,7 +246,7 @@ QUnit.module('ActionMenu - handleExport', {
 });
 
 test('clicking on the export menu option calls the handleExport function', function () {
-  this.spies.handleExport = this.stub(ActionMenu.prototype, 'handleExport');
+  this.spies.handleExport = sandbox.stub(ActionMenu.prototype, 'handleExport');
 
   this.menuItem.click();
 
@@ -254,7 +256,7 @@ test('clicking on the export menu option calls the handleExport function', funct
 test('shows a message to the user indicating the export is in progress', function () {
   const exportResult = this.getPromise('resolved');
   this.spies.startExport.returns(exportResult);
-  this.spies.flashMessage = this.stub(window.$, 'flashMessage');
+  this.spies.flashMessage = sandbox.stub(window.$, 'flashMessage');
 
   this.menuItem.click();
 
@@ -270,7 +272,7 @@ test('changes the "Export" menu item to indicate the export is in progress', fun
 
   // Click the menu item.  This closes it.
   this.menuItem.click();
-  // Click the PopoverMenu trigger again to re-open the menu
+  // Click the Menu trigger again to re-open the menu
   this.trigger.simulate('click');
 
   // Re-fetch the menu element
@@ -289,6 +291,18 @@ test('starts the export using the GradebookExportManager instance', function () 
   this.menuItem.click();
 
   equal(this.spies.startExport.callCount, 1);
+
+  return exportResult;
+});
+
+test('passes the grading period to the GradebookExportManager', function () {
+  const exportResult = this.getPromise('resolved');
+
+  this.spies.startExport.returns(exportResult);
+
+  this.menuItem.click();
+
+  strictEqual(this.spies.startExport.firstCall.args[0], "1234");
 
   return exportResult;
 });
@@ -339,7 +353,7 @@ test('on success, shows the "New Export" menu item', function () {
 test('on failure, shows a message to the user indicating the export failed', function () {
   const exportResult = this.getPromise('rejected');
   this.spies.startExport.returns(exportResult);
-  this.spies.flashError = this.stub(window.$, 'flashError');
+  this.spies.flashError = sandbox.stub(window.$, 'flashError');
 
   return this.wrapper.instance().handleExport().then(() => {
     equal(this.spies.flashError.callCount, 1);
@@ -366,7 +380,7 @@ test('on failure, renables the "Export" menu item', function () {
 QUnit.module('ActionMenu - handleImport', {
   setup () {
     this.spies = {};
-    this.spies.gotoUrl = this.stub(ActionMenu, 'gotoUrl');
+    this.spies.gotoUrl = sandbox.stub(ActionMenu, 'gotoUrl');
 
     this.wrapper = mount(<ActionMenu {...workingMenuProps()} />);
     this.wrapper.find('button').simulate('click');
@@ -381,7 +395,7 @@ QUnit.module('ActionMenu - handleImport', {
 });
 
 test('clicking on the import menu option calls the handleImport function', function () {
-  const handleImportSpy = this.spy(ActionMenu.prototype, 'handleImport');
+  const handleImportSpy = sandbox.spy(ActionMenu.prototype, 'handleImport');
 
   this.menuItem.click();
 
@@ -405,7 +419,7 @@ QUnit.module('ActionMenu - disableImports', {
 });
 
 test('is called once when the component renders', function () {
-  const disableImportsSpy = this.spy(ActionMenu.prototype, 'disableImports');
+  const disableImportsSpy = sandbox.spy(ActionMenu.prototype, 'disableImports');
 
   this.wrapper.update();
 
@@ -528,7 +542,7 @@ test('returns the previous export stored in the state if it is available', funct
     label: 'previous export label',
     attachmentUrl: 'http://attachmentUrl'
   };
-  const lastExportFromState = this.stub(ActionMenu.prototype, 'lastExportFromState').returns(stateExport);
+  const lastExportFromState = sandbox.stub(ActionMenu.prototype, 'lastExportFromState').returns(stateExport);
 
   deepEqual(this.wrapper.instance().previousExport(), stateExport);
   equal(lastExportFromState.callCount, 1);
@@ -536,12 +550,12 @@ test('returns the previous export stored in the state if it is available', funct
 
 test('returns the previous export stored in the props if nothing is available in state', function () {
   const expectedPreviousExport = {
-    attachmentUrl: 'http://downloadUrl&download_frd=1',
+    attachmentUrl: 'http://downloadUrl',
     label: 'Previous Export (Jan 20, 2009 at 5pm)'
   };
 
-  const lastExportFromState = this.stub(ActionMenu.prototype, 'lastExportFromState').returns(undefined);
-  const lastExportFromProps = this.stub(ActionMenu.prototype, 'lastExportFromProps').returns(previousExportProps().lastExport);
+  const lastExportFromState = sandbox.stub(ActionMenu.prototype, 'lastExportFromState').returns(undefined);
+  const lastExportFromProps = sandbox.stub(ActionMenu.prototype, 'lastExportFromProps').returns(previousExportProps().lastExport);
 
   deepEqual(this.wrapper.instance().previousExport(), expectedPreviousExport);
   equal(lastExportFromState.callCount, 1);
@@ -549,8 +563,8 @@ test('returns the previous export stored in the props if nothing is available in
 });
 
 test('returns undefined if state has nothing and props have nothing', function () {
-  const lastExportFromState = this.stub(ActionMenu.prototype, 'lastExportFromState').returns(undefined);
-  const lastExportFromProps = this.stub(ActionMenu.prototype, 'lastExportFromProps').returns(undefined);
+  const lastExportFromState = sandbox.stub(ActionMenu.prototype, 'lastExportFromState').returns(undefined);
+  const lastExportFromProps = sandbox.stub(ActionMenu.prototype, 'lastExportFromProps').returns(undefined);
 
   deepEqual(this.wrapper.instance().previousExport(), undefined);
   equal(lastExportFromState.callCount, 1);
@@ -582,7 +596,7 @@ test('returns false if exportInProgress is set to false', function () {
 QUnit.module('ActionMenu - Post Grade Ltis', {
   setup () {
     this.props = workingMenuProps();
-    this.props.postGradesLtis[0].onSelect = this.stub();
+    this.props.postGradesLtis[0].onSelect = sinon.stub();
 
     this.wrapper = mount(<ActionMenu {...this.props} />);
     this.wrapper.find('button').simulate('click');
@@ -621,7 +635,7 @@ QUnit.module('ActionMenu - Post Grade Feature', {
 
 test('launches the PostGrades App when selected', function (assert) {
   const done = assert.async();
-  this.stub(PostGradesApp, 'AppLaunch');
+  sandbox.stub(PostGradesApp, 'AppLaunch');
 
   document.querySelector('[data-menu-id="post_grades_feature_tool"]').click();
 
@@ -677,7 +691,7 @@ test('Calls gotoUrl with publishToSisUrl when clicked', function () {
       publishToSisUrl: 'http://example.com'
     }
   });
-  this.stub(ActionMenu, 'gotoUrl');
+  sandbox.stub(ActionMenu, 'gotoUrl');
 
   const $menuItem = $('[role="menuitem"] [data-menu-id="publish-grades-to-sis"]');
   $menuItem.click();

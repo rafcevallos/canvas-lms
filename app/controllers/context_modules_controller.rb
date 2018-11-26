@@ -28,7 +28,7 @@ class ContextModulesController < ApplicationController
     include ContextModulesHelper
 
     def load_module_file_details
-      attachment_tags = @context.module_items_visible_to(@current_user).where(content_type: 'Attachment').preload(:content => :folder)
+      attachment_tags = Shackles.activate(:slave) { @context.module_items_visible_to(@current_user).where(content_type: 'Attachment').preload(:content => :folder).to_a }
       attachment_tags.inject({}) do |items, file_tag|
         items[file_tag.id] = {
           id: file_tag.id,
@@ -267,6 +267,9 @@ class ContextModulesController < ApplicationController
     if authorized_action(@context.context_modules.temp_record, @current_user, :update)
       m = @context.context_modules.not_deleted.first
 
+      # A hash where the key is the module id and the value is the module position
+      order_before = Hash[@context.context_modules.not_deleted.pluck(:id, :position)]
+
       m.update_order(params[:order].split(","))
       # Need to invalidate the ordering cache used by context_module.rb
       @context.touch
@@ -278,6 +281,7 @@ class ContextModulesController < ApplicationController
       @modules.each do |m|
         m.updated_at = Time.now
         m.save_without_touching_context
+        Canvas::LiveEvents.module_updated(m) if m.position != order_before[m.id]
       end
       @context.touch
 
@@ -292,7 +296,7 @@ class ContextModulesController < ApplicationController
       info = {}
       now = Time.now.utc.iso8601
 
-      all_tags = @context.module_items_visible_to(@current_user)
+      all_tags = Shackles.activate(:slave) { @context.module_items_visible_to(@current_user).to_a }
       user_is_admin = @context.grants_right?(@current_user, session, :read_as_admin)
 
       preload_assignments_and_quizzes(all_tags, user_is_admin)
@@ -305,6 +309,7 @@ class ContextModulesController < ApplicationController
         else
           {:points_possible => nil, :due_date => nil}
         end
+        info[tag.id][:todo_date] = tag.content && tag.content[:todo_date]
       end
       render :json => info
     end
@@ -318,9 +323,11 @@ class ContextModulesController < ApplicationController
       is_master_course = MasterCourses::MasterTemplate.is_master_course?(@context)
 
       if is_child_course || is_master_course
-        tag_scope = @context.module_items_visible_to(@current_user).where(:content_type => %w{Assignment Attachment DiscussionTopic Quizzes::Quiz WikiPage})
-        tag_scope = tag_scope.where(:id => params[:tag_id]) if params[:tag_id]
-        tag_ids = tag_scope.pluck(:id)
+        tag_ids = Shackles.activate(:slave) do
+          tag_scope = @context.module_items_visible_to(@current_user).where(:content_type => %w{Assignment Attachment DiscussionTopic Quizzes::Quiz WikiPage})
+          tag_scope = tag_scope.where(:id => params[:tag_id]) if params[:tag_id]
+          tag_scope.pluck(:id)
+        end
         restriction_info = {}
         if tag_ids.any?
           restriction_info = is_child_course ?

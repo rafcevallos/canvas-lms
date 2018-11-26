@@ -1,3 +1,21 @@
+#
+# Copyright (C) 2017 - present Instructure, Inc.
+#
+# This file is part of Canvas.
+#
+# Canvas is free software: you can redistribute it and/or modify it under
+# the terms of the GNU Affero General Public License as published by the Free
+# Software Foundation, version 3 of the License.
+#
+# Canvas is distributed in the hope that it will be useful, but WITHOUT ANY
+# WARRANTY; without even the implied warranty of MERCHANTABILITY or FITNESS FOR
+# A PARTICULAR PURPOSE. See the GNU Affero General Public License for more
+# details.
+#
+# You should have received a copy of the GNU Affero General Public License along
+# with this program. If not, see <http://www.gnu.org/licenses/>.
+#
+
 require File.expand_path(File.dirname(__FILE__) + '/lti2_api_spec_helper')
 require File.expand_path(File.dirname(__FILE__) + '/../../sharding_spec_helper')
 require_dependency "lti/ims/access_token_helper"
@@ -46,7 +64,7 @@ module Lti
         tool_proxy[:raw_data]['enabled_capability'] = %w(vnd.instructure.webhooks.assignment.attachment_created)
         tool_proxy.save!
         post create_endpoint, params: { subscription: subscription }, headers: request_headers
-        expect(response).to be_success
+        expect(response).to be_successful
       end
 
       it 'checks that the tool proxy has the correct enabled capabilities' do
@@ -109,7 +127,7 @@ module Lti
       it 'deletes subscriptions' do
         allow(subscription_service).to receive_messages(tool_proxy_subscription: ok_response)
         delete delete_endpoint, headers: request_headers
-        expect(response).to be_success
+        expect(response).to be_successful
       end
 
       it 'gives 404 if subscription does not exist' do
@@ -147,7 +165,7 @@ module Lti
       it 'shows subscriptions' do
         allow(subscription_service).to receive_messages(tool_proxy_subscription: ok_response)
         get show_endpoint, headers: request_headers
-        expect(response).to be_success
+        expect(response).to be_successful
       end
 
       it 'gives gives 404 if subscription does not exist' do
@@ -185,7 +203,7 @@ module Lti
 
       it 'updates subscriptions' do
         put update_endpoint, params: {subscription: subscription}, headers: request_headers
-        expect(response).to be_success
+        expect(response).to be_successful
       end
 
       it 'gives gives 404 if subscription does not exist' do
@@ -275,7 +293,7 @@ module Lti
       it 'shows subscriptions for a tool proxy from a pagination response' do
         allow(subscription_service).to receive(:tool_proxy_subscriptions) { ok_pagination_response }
         get index_endpoint, headers: request_headers
-        expect(response).to be_success
+        expect(response).to be_successful
       end
 
       it 'includes pagination headers' do
@@ -287,7 +305,7 @@ module Lti
       it 'shows subscriptions for a tool proxy with optional pagination header' do
         allow(subscription_service).to receive(:tool_proxy_subscriptions) { ok_pagination_response }
         get index_endpoint, headers: pagination_request_headers
-        expect(response).to be_success
+        expect(response).to be_successful
       end
 
       it 'requires JWT Access token' do

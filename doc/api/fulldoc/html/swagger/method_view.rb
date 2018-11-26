@@ -1,7 +1,27 @@
+#
+# Copyright (C) 2013 - present Instructure, Inc.
+#
+# This file is part of Canvas.
+#
+# Canvas is free software: you can redistribute it and/or modify it under
+# the terms of the GNU Affero General Public License as published by the Free
+# Software Foundation, version 3 of the License.
+#
+# Canvas is distributed in the hope that it will be useful, but WITHOUT ANY
+# WARRANTY; without even the implied warranty of MERCHANTABILITY or FITNESS FOR
+# A PARTICULAR PURPOSE. See the GNU Affero General Public License for more
+# details.
+#
+# You should have received a copy of the GNU Affero General Public License along
+# with this program. If not, see <http://www.gnu.org/licenses/>.
+#
+
 require 'hash_view'
 require 'argument_view'
 require 'route_view'
 require 'return_view'
+require 'response_field_view'
+require 'deprecated_method_view'
 
 class MethodView < HashView
   def initialize(method)
@@ -34,8 +54,22 @@ class MethodView < HashView
     format(@method.docstring)
   end
 
+  def deprecated?
+    select_tags('deprecated_method').any?
+  end
+
+  def deprecation_description
+    tag = select_tags('deprecated_method').first
+    description = tag ? DeprecatedMethodView.new(tag).description : ''
+    format(description)
+  end
+
   def raw_arguments
-    select_tags("argument")
+    select_tags(['argument', 'deprecated_argument'])
+  end
+
+  def raw_response_fields
+    select_tags(['response_field', 'deprecated_response_field'])
   end
 
   def return_tag
@@ -98,10 +132,11 @@ class MethodView < HashView
     end
   end
 
-protected
-  def select_tags(tag_name)
+  protected
+  def select_tags(tag_names)
+    names = Array.wrap(tag_names)
     @method.tags.select do |tag|
-      tag.tag_name.downcase == tag_name
+      names.include?(tag.tag_name.downcase)
     end
   end
 

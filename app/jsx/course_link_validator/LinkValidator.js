@@ -17,6 +17,7 @@
  */
 
 import $ from 'jquery'
+import 'compiled/jquery.rails_flash_notifications'
 import React from 'react'
 import I18n from 'i18n!link_validator'
 import ValidatorResults from './ValidatorResults'
@@ -41,16 +42,16 @@ import ValidatorResults from './ValidatorResults'
         dataType: 'json',
         success: (data) => {
           // Keep trying until the request has been completed
-          if (data.state === 'queued' || data.state === 'running') {
+          if (data.workflow_state === 'queued' || data.workflow_state === 'running') {
             setTimeout(() => {
               this.getResults();
             }, 10000);
           } else {
-            if (data.state === 'completed') {
+            if (data.workflow_state === 'completed') {
               this.setState({
                 buttonMessage: I18n.t("Restart Link Validation"),
                 buttonDisabled: false,
-                results: data.issues,
+                results: data.results.issues,
                 displayResults: true,
                 error: false,
               });
@@ -60,7 +61,7 @@ import ValidatorResults from './ValidatorResults'
                 buttonMessage: I18n.t("Start Link Validation"),
                 buttonDisabled: false
               });
-              if (data.state === 'failed' && !initial_load) {
+              if (data.workflow_state === 'failed' && !initial_load) {
                 this.setState({
                   error: true
                 });
@@ -79,12 +80,15 @@ import ValidatorResults from './ValidatorResults'
       this.setState({
         buttonMessage: I18n.t("Loading..."),
         buttonDisabled: true,
+        displayResults: false,
+        results: []
       });
     },
     startValidation () {
       $('#all-results').hide();
 
       this.setLoadingState();
+      $.screenReaderFlashMessage(I18n.t("Link validation is running"))
 
       // You need to send a POST request to the API to initialize validation
       $.ajax({
@@ -106,10 +110,11 @@ import ValidatorResults from './ValidatorResults'
     },
 
     render () {
-      var loadingImage;
+      let loadingImage;
       if (this.state.buttonDisabled) {
-        loadingImage = <img src="/images/ajax-loader.gif"/>;
+        loadingImage = <img src="/images/ajax-loader.gif" alt={I18n.t('Link validation is running')}/>
       }
+
       return (
         <div>
           <button onClick={this.startValidation} className="Button Button--primary"

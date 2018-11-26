@@ -77,7 +77,7 @@ describe AssignmentOverrideStudent do
     end
 
     it 'on creation, recalculates cached due dates on the assignment' do
-      expect(DueDateCacher).to receive(:recompute).with(@assignment)
+      expect(DueDateCacher).to receive(:recompute_users_for_course).with(@student.id, @assignment.context, [@assignment]).once
       @assignment_override.assignment_override_students.create!(user: @student)
     end
 
@@ -87,7 +87,8 @@ describe AssignmentOverrideStudent do
       # Expect DueDateCacher to be called once from AssignmentOverrideStudent after it's destroyed and another time
       # after it realizes that its corresponding AssignmentOverride can also be destroyed because it now has an empty
       # set of students.  Hence the specific nature of this expectation.
-      expect(DueDateCacher).to receive(:recompute).with(@assignment).twice
+      expect(DueDateCacher).to receive(:recompute_users_for_course).with(@student.id, @assignment.context, [@assignment]).once
+      expect(DueDateCacher).to receive(:recompute).with(@assignment).once
       override_student.destroy
     end
   end
@@ -125,7 +126,7 @@ describe AssignmentOverrideStudent do
   end
 
   def adhoc_override_with_student
-    student_in_course
+    student_in_course(:active_all => true)
     @assignment = assignment_model(:course => @course)
     @ao = AssignmentOverride.new()
     @ao.assignment = @assignment
@@ -149,7 +150,6 @@ describe AssignmentOverrideStudent do
   describe "clean_up_for_assignment" do
     it "if callbacks aren't run clean_up_for_assignment should delete invalid overrides" do
       adhoc_override_with_student
-      #no callbacks
       Score.where(enrollment_id: @user.enrollments).each(&:destroy_permanently!)
       @user.enrollments.each(&:destroy_permanently!)
 
@@ -177,6 +177,22 @@ describe AssignmentOverrideStudent do
       expect(@override_student).to be_active
       AssignmentOverrideStudent.clean_up_for_assignment(@assignment)
       expect(@override_student.reload).to be_deleted
+    end
+
+    it "should not broadcast notifications when processing a cleanup" do
+      Timecop.freeze(1.day.ago) do
+        adhoc_override_with_student
+      end
+      Enrollment.where(:id => @enrollment).update_all(:workflow_state => "deleted") # skip callbacks
+
+      notification_name = "Assignment Due Date Override Changed"
+      @notification = Notification.create! :name => notification_name, :category => "TestImmediately"
+      teacher_in_course(active_all: true)
+      notification_policy_model
+
+      expect(DelayedNotification).to_not receive(:process)
+      AssignmentOverrideStudent.clean_up_for_assignment(@assignment)
+      expect(@ao.reload).to be_deleted
     end
 
     it "trying to update an orphaned override student (one without an enrollment) removes it" do

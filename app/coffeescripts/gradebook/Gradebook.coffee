@@ -61,6 +61,7 @@ define [
   'jsx/gradebook/shared/helpers/assignmentHelper'
   '../api/gradingPeriodsApi'
   '../api/gradingPeriodSetsApi'
+  '../../jsx/gradebook/shared/helpers/GradeCalculationHelper'
   'jst/_avatar' #needed by row_student_name
   'jquery.ajaxJSON'
   'jquery.instructure_date_and_time'
@@ -79,11 +80,11 @@ define [
 ], (
   $, _, Backbone, tz, DataLoader, React, ReactDOM, LongTextEditor, KeyboardNavDialog, KeyboardNavTemplate, Slick,
   TotalColumnHeaderView, round, InputFilterView, i18nObj, I18n, GRADEBOOK_TRANSLATIONS, CourseGradeCalculator,
-  EffectiveDueDates, GradingSchemeHelper, GradeFormatHelper, UserSettings, Spinner, SubmissionDetailsDialog,
+  EffectiveDueDates, {scoreToGrade}, GradeFormatHelper, UserSettings, Spinner, SubmissionDetailsDialog,
   AssignmentGroupWeightsDialog, GradeDisplayWarningDialog, PostGradesFrameDialog, SubmissionCell,
   GradebookHeaderMenu, NumberCompare, natcompare, htmlEscape, PostGradesStore, PostGradesApp, SubmissionStateMap,
   ColumnHeaderTemplate, GroupTotalCellTemplate, RowStudentNameTemplate, SectionMenuView, GradingPeriodMenuView,
-  GradebookKeyboardNav, assignmentHelper, GradingPeriodsApi, GradingPeriodSetsApi
+  GradebookKeyboardNav, assignmentHelper, GradingPeriodsApi, GradingPeriodSetsApi, {scoreToPercentage}
 ) ->
   # This class both creates the slickgrid instance, and acts as the data source for that instance.
   class Gradebook
@@ -220,7 +221,7 @@ define [
         assignmentGroupsURL: assignmentGroupsURL
         assignmentGroupsParams:
           exclude_response_fields: @fieldsToExcludeFromAssignments
-          include: ['overrides']
+          include: ['grades_published', 'overrides']
         onlyLoadAssignmentGroups: true
       )
       $.when(overrideDataLoader.gotAssignmentGroups).then(@addOverridesToPostGradesStore)
@@ -317,6 +318,7 @@ define [
         for assignment in group.assignments
           assignment.assignment_group = group
           assignment.due_at = tz.parse(assignment.due_at)
+          assignment.moderation_in_progress = assignment.moderated_grading and !assignment.grades_published
           @updateAssignmentEffectiveDueDates(assignment)
           @assignments[assignment.id] = assignment
 
@@ -558,12 +560,17 @@ define [
       matchingSection and matchingFilter
 
     handleAssignmentMutingChange: (assignment) =>
+      gradebookAssignment = @assignments[assignment.id]
+      gradebookAssignment.anonymize_students = assignment.anonymize_students
+      gradebookAssignment.muted = assignment.muted
       idx = @grid.getColumnIndex("assignment_#{assignment.id}")
       colDef = @grid.getColumns()[idx]
       colDef.name = @assignmentHeaderHtml(assignment)
       @grid.setColumns(@grid.getColumns())
       @fixColumnReordering()
       @buildRows()
+      allStudents = Object.values(@students).concat(Object.values(@studentViewStudents))
+      @setupGrading(allStudents)
 
     handleAssignmentGroupWeightChange: (assignment_group_options) =>
       columns = @grid.getColumns()
@@ -720,6 +727,8 @@ define [
 
           if !assignment?
             @staticCellFormatter(row, col, '')
+          else if assignment.anonymize_students
+            @lockedAndHiddenGradeCellFormatter(row, col, 'anonymous')
           else if submission.workflow_state == 'pending_review'
            (SubmissionCell[assignment.grading_type] || SubmissionCell).formatter(row, col, submission, assignment, student, formatterOpts)
           else if assignment.grading_type == 'points' && assignment.points_possible
@@ -751,7 +760,7 @@ define [
       possible = if possible then I18n.n(possible) else possible
 
       if val.possible and @options.grading_standard and columnDef.type is 'total_grade'
-        letterGrade = GradingSchemeHelper.scoreToGrade(percentage, @options.grading_standard)
+        letterGrade = scoreToGrade(percentage, @options.grading_standard)
 
       templateOpts =
         score: I18n.n(round(val.score, round.DEFAULT))
@@ -770,7 +779,7 @@ define [
       val
 
     calculateAndRoundGroupTotalScore: (score, possible_points) ->
-      grade = (score / possible_points) * 100
+      grade = scoreToPercentage(score, possible_points)
       round(grade, round.DEFAULT)
 
     submissionsForStudent: (student) =>
@@ -1301,8 +1310,7 @@ define [
       columns = []
 
       for column in @allAssignmentColumns
-        if @disabledAssignments && @disabledAssignments.indexOf(column.object.id) != -1
-          column.cssClass = "cannot_edit"
+        column.cssClass = "cannot_edit" if column.object.moderation_in_progress
         submissionType = ''+ column.object.submission_types
         columns.push(column) unless submissionType is "not_graded" or
                                 submissionType is "attendance" and not @show_attendance
@@ -1323,15 +1331,20 @@ define [
 
     customColumnDefinitions: ->
       @customColumns.map (c) ->
-        id: "custom_col_#{c.id}"
-        name: if c.teacher_notes then I18n.t('Notes') else htmlEscape c.title
-        field: "custom_col_#{c.id}"
-        width: 100
-        cssClass: "meta-cell custom_column"
-        resizable: true
-        editor: LongTextEditor
-        autoEdit: false
-        maxLength: 255
+        cssClasses = ["meta-cell", "custom_column"]
+        cssClasses.push("cannot_edit") if c.read_only
+
+        {
+          id: "custom_col_#{c.id}"
+          name: if c.teacher_notes then I18n.t('Notes') else htmlEscape c.title
+          field: "custom_col_#{c.id}"
+          width: 100
+          cssClass: cssClasses.join(" ")
+          resizable: true
+          editor: LongTextEditor
+          autoEdit: false
+          maxLength: 255
+        }
 
     initGrid: =>
       #this is used to figure out how wide to make each column

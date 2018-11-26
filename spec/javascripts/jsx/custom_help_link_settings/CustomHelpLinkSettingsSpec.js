@@ -19,8 +19,9 @@
 define([
   'react',
   'react-dom',
-  'jsx/custom_help_link_settings/CustomHelpLinkSettings'
-], (React, ReactDOM, CustomHelpLinkSettings) => {
+  'jsx/custom_help_link_settings/CustomHelpLinkSettings',
+  'jquery'
+], (React, ReactDOM, CustomHelpLinkSettings, $) => {
 
   const container = document.getElementById('fixtures')
 
@@ -91,5 +92,56 @@ define([
 
     link.url = 'mailto:test@test.com'
     ok(subject.validate(link))
+  })
+
+  test('assigns unique link ids', function() {
+    const subject = this.render({
+      links: [
+        {
+          id: 'link1',
+          available_to: ['student'],
+          text: 'Blah',
+          url: '#blah',
+          type: 'custom'
+        },
+        {
+          id: 'link3',
+          available_to: ['student'],
+          text: 'Bleh',
+          url: '#bleh',
+          type: 'custom'
+        }
+      ]
+    })
+    subject.add({text: 'eh', url: 'ftp://eh', available_to: ['student']})
+    equal(subject.state.links.find(link => link.text === 'eh').id, 'link4')
+  })
+
+
+  test('calls flashScreenreaderAlert when appropriate', function() {
+    sinon.spy($, 'screenReaderFlashMessage')
+    const subject = this.render({name: ''});
+    subject.validateName({target: subject})
+    // flash message when transitions to invalid
+    equal($.screenReaderFlashMessage.callCount, 1)
+
+    // no flash message as long as is invalid
+    subject.validateName({target: subject})
+    equal($.screenReaderFlashMessage.callCount, 1)
+    equal(subject.state.isNameValid, false)
+
+    // it's valid now
+    subject.value = "foo"
+    subject.validateName({target: subject})
+    equal($.screenReaderFlashMessage.callCount, 1)
+    equal(subject.state.isNameValid, true)
+
+    // and invalid again, show message
+    subject.value = ""
+    subject.validateName({target: subject})
+    equal($.screenReaderFlashMessage.callCount, 2)
+    equal(subject.state.isNameValid, false)
+
+    $.screenReaderFlashMessage.restore()
   })
 })

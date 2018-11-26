@@ -20,10 +20,10 @@ import React from 'react'
 import {string, bool, shape} from 'prop-types'
 import {stringify} from 'qs'
 import permissionFilter from '../shared/helpers/permissionFilter'
-import CoursesStore from './CoursesStore'
-import TermsStore from './TermsStore'
-import AccountsTreeStore from './AccountsTreeStore'
-import UsersStore from './UsersStore'
+import CoursesStore from './store/CoursesStore'
+import TermsStore from './store/TermsStore'
+import AccountsTreeStore from './store/AccountsTreeStore'
+import UsersStore from './store/UsersStore'
 
 const stores = [CoursesStore, TermsStore, AccountsTreeStore, UsersStore]
 
@@ -51,7 +51,7 @@ export default class AccountCourseUserSearch extends React.Component {
   render() {
     const tabList = this.props.store.getState().tabList
     const tabs = permissionFilter(tabList.tabs, this.props.permissions)
-    const ActivePane = tabs[tabList.selected].pane
+    const ActivePane = tabs.length === 1 ? tabs[0].pane : tabs[tabList.selected].pane
 
     return (
       <ActivePane

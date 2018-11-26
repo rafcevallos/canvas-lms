@@ -19,6 +19,7 @@
 module Api::V1::Attachment
   include Api::V1::Json
   include Api::V1::Locked
+  include Api::V1::Progress
   include Api::V1::User
   include Api::V1::UsageRights
 
@@ -38,24 +39,25 @@ module Api::V1::Attachment
   def attachment_json(attachment, user, url_options = {}, options = {})
     hash = {
       'id' => attachment.id,
+      'uuid' => attachment.uuid,
       'folder_id' => attachment.folder_id,
       'display_name' => attachment.display_name,
       'filename' => attachment.filename,
     }
     return hash if options[:only] && options[:only].include?('names')
 
-    options.reverse_merge!(submission_attachment: false)
+    options.reverse_merge!(skip_permission_checks: false)
     includes = options[:include] || []
 
     # it takes loads of queries to figure out that a teacher doesn't have
     # :update permission on submission attachments.  we'll handle the
     # permissions ourselves instead of using the usual stuff to save thousands
     # of queries
-    submission_attachment = options[:submission_attachment]
+    skip_permission_checks = options[:skip_permission_checks]
 
     # this seems like a stupid amount of branching but it avoids expensive
     # permission checks
-    hidden_for_user = if submission_attachment
+    hidden_for_user = if skip_permission_checks
                         false
                       elsif !attachment.hidden?
                         false
@@ -65,17 +67,18 @@ module Api::V1::Attachment
                         !can_view_hidden_files?(attachment.context, user)
                       end
 
-    downloadable = !attachment.locked_for?(user, check_policies: true)
+    downloadable = skip_permission_checks || !attachment.locked_for?(user, check_policies: true)
 
     if downloadable
-      thumbnail_url = attachment.thumbnail_url
+      # using the multi-parameter form because not every class that mixes in
+      # this api helper also mixes in ApplicationHelper (I'm looking at you,
+      # DiscussionTopic::MaterializedView), and in those cases we need to
+      # include the url_options
+      if attachment.thumbnailable?
+        thumbnail_url = thumbnail_image_url(attachment, attachment.uuid, url_options)
+      end
       if options[:thumbnail_url]
-        # not the same as thumbnail_url above because:
-        # * that one's going to be a direct (and possibly signed) s3, inst-fs,
-        #   etc. link for immediate use.
-        # * this one's a more compact canvas link to be stored for later use;
-        #   it will resolve to the former when accessed
-        url = thumbnail_image_url(attachment)
+        url = thumbnail_url
       else
         h = { :download => '1', :download_frd => '1' }
         h.merge!(:verifier => attachment.uuid) unless options[:omit_verifier_in_app] && (respond_to?(:in_app?, true) && in_app? || @authenticated_with_jwt)
@@ -94,7 +97,7 @@ module Api::V1::Attachment
       'updated_at' => attachment.updated_at,
       'unlock_at' => attachment.unlock_at,
       'locked' => !!attachment.locked,
-      'hidden' => submission_attachment ? false : !!attachment.hidden?,
+      'hidden' => skip_permission_checks ? false : !!attachment.hidden?,
       'lock_at' => attachment.lock_at,
       'hidden_for_user' => hidden_for_user,
       'thumbnail_url' => thumbnail_url,
@@ -102,7 +105,11 @@ module Api::V1::Attachment
       'mime_class' => attachment.mime_class,
       'media_entry_id' => attachment.media_entry_id
     )
-    locked_json(hash, attachment, user, 'file')
+    if skip_permission_checks
+      hash['locked_for_user'] = false
+    else
+      locked_json(hash, attachment, user, 'file')
+    end
 
     if includes.include? 'user'
       context = attachment.context
@@ -113,7 +120,9 @@ module Api::V1::Attachment
 
       url_opts = {
         moderated_grading_whitelist: options[:moderated_grading_whitelist],
-        enable_annotations: options[:enable_annotations]
+        enable_annotations: options[:enable_annotations],
+        enrollment_type: options[:enrollment_type],
+        anonymous_instructor_annotations: options[:anonymous_instructor_annotations]
       }
       hash['preview_url'] = attachment.crocodoc_url(user, url_opts) ||
                             attachment.canvadoc_url(user, url_opts)
@@ -130,8 +139,14 @@ module Api::V1::Attachment
     if includes.include? "context_asset_string"
       hash['context_asset_string'] = attachment.context.try(:asset_string)
     end
-    if includes.include? 'avatar' && respond_to?(:avatar_json)
+    if includes.include?('avatar') && respond_to?(:avatar_json)
       hash['avatar'] = avatar_json(user, attachment, type: 'attachment')
+    end
+    if includes.include? 'instfs_uuid'
+      # This option has been included to facilitate inst-fs end-to-end tests,
+      # and is not documented as a publicly available api option.
+      # It may be removed at any time.
+      hash['instfs_uuid'] = attachment.instfs_uuid
     end
 
     if options[:master_course_status]
@@ -153,7 +168,7 @@ module Api::V1::Attachment
     if !context.respond_to?(:folders)
       nil
     elsif params[:parent_folder_id]
-      context.folders.find(params[:parent_folder_id])
+      context.folders.active.where(id: params[:parent_folder_id]).first
     elsif params[:parent_folder_path].is_a?(String)
       Folder.assert_path(params[:parent_folder_path], context)
     end
@@ -212,31 +227,41 @@ module Api::V1::Attachment
     return if folder && !authorized_action(folder, @current_user, :manage_contents)
 
     # no permission check required to use the preferred folder
-    folder ||= opts[:folder]
 
+    folder ||= opts[:folder]
+    progress_context = opts[:assignment] || @current_user
     if InstFS.enabled?
-      if params[:url]
-        # TODO: CNVS-39171
-        # * asynchronously tell inst-fs to fetch and store the file, then
-        #   ping api_v1_files_capture_url on success or failure
-        # * return a Progress from this method
-        # * update client and docs to recognize the Progress
-        # * augment api_capture to update the appropriate progress when it creates the file
-        # * allow api_capture to receive an error and fail the appropriate
-        #   Progress instead of creating a file
-        raise NotImplementedError
-      else
-        json = InstFS.upload_preflight_json(
-          context: context,
-          user: @current_user,
-          folder: folder,
-          filename: infer_upload_filename(params),
-          content_type: infer_upload_content_type(params),
-          on_duplicate: infer_on_duplicate(params),
-          quota_exempt: !opts[:check_quota],
-          capture_url: api_v1_files_capture_url
-        )
+      additional_capture_params = {}
+      progress_json_result = if params[:url]
+        progress = ::Progress.new(context: progress_context, user_id: @current_user, tag: :upload_via_url)
+        progress.start
+        progress.save!
+
+        additional_capture_params = {
+          submit_assignment: params[:submit_assignment],
+          eula_agreement_timestamp: params[:eula_agreement_timestamp]
+        }
+
+        progress_json(progress, @current_user, session)
       end
+
+      json = InstFS.upload_preflight_json(
+        context: context,
+        root_account: context.try(:root_account) || @domain_root_account,
+        user: logged_in_user,
+        acting_as: @current_user,
+        access_token: @access_token,
+        folder: folder,
+        filename: infer_upload_filename(params),
+        content_type: infer_upload_content_type(params),
+        on_duplicate: infer_on_duplicate(params),
+        quota_exempt: !opts[:check_quota],
+        capture_url: api_v1_files_capture_url,
+        target_url: params[:url],
+        progress_json: progress_json_result,
+        include_param: params[:success_include],
+        additional_capture_params: additional_capture_params
+      )
     else
       @attachment = Attachment.new
       @attachment.shard = context.shard
@@ -247,24 +272,42 @@ module Api::V1::Attachment
       @attachment.folder = folder
       @attachment.set_publish_state_for_usage_rights
       @attachment.file_state = 'deleted'
-      @attachment.workflow_state = 'unattached'
+      @attachment.workflow_state = opts[:temporary] ? 'unattached_temporary' : 'unattached'
       @attachment.modified_at = Time.now.utc
       @attachment.save!
 
       on_duplicate = infer_on_duplicate(params)
       if params[:url]
-        @attachment.send_later_enqueue_args(:clone_url,
-          {
-            priority: Delayed::LOW_PRIORITY,
-            max_attempts: 1,
-            n_strand: 'file_download'
-          },
-          params[:url], on_duplicate, opts[:check_quota])
-        json = {
-          id: @attachment.id,
-          upload_status: 'pending',
-          status_url: api_v1_file_status_url(@attachment, @attachment.uuid)
-        }
+
+        progress = ::Progress.new(context: progress_context, user: @current_user, tag: :upload_via_url)
+        progress.reset!
+
+        # TODO: The `submit_assignment` param is used to help in backwards compat for prevent double submissions,
+        # can be removed in the next release.
+        if params[:submit_assignment].to_s == 'true' # coerced to handle json body vs url param
+          executor = Services::SubmitHomeworkService.create_clone_url_executor(
+            params[:url], on_duplicate, opts[:check_quota], progress: progress
+          )
+          Services::SubmitHomeworkService.submit_job(progress, @attachment, params[:eula_agreement_timestamp], executor)
+
+        # Old way that does not submit the assignment (browser js will try to do it)
+        else
+          progress.process_job(
+            @attachment,
+            :clone_url,
+            {
+              n_strand: Attachment.clone_url_strand(params[:url]),
+              preserve_method_args: true,
+              priority: Delayed::HIGH_PRIORITY
+            },
+            params[:url],
+            on_duplicate,
+            opts[:check_quota],
+            { progress: progress }
+          )
+        end
+
+        json = { progress: progress_json(progress, @current_user, session) }
       else
         on_duplicate = nil if on_duplicate == 'overwrite'
         quota_exemption = @attachment.quota_exemption_key if !opts[:check_quota]
@@ -272,12 +315,14 @@ module Api::V1::Attachment
           @current_pseudonym,
           api_v1_files_create_url(
             on_duplicate: on_duplicate,
-            quota_exemption: quota_exemption),
+            quota_exemption: quota_exemption,
+            success_include: params[:success_include]),
           api_v1_files_create_success_url(
             @attachment,
             uuid: @attachment.uuid,
             on_duplicate: on_duplicate,
-            quota_exemption: quota_exemption),
+            quota_exemption: quota_exemption,
+            include: params[:success_include]),
           ssl: request.ssl?,
           file_param: opts[:file_param],
           no_redirect: params[:no_redirect])

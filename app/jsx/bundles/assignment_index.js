@@ -47,7 +47,8 @@ const assignmentGroups = new AssignmentGroupCollection([], {
   params: {
     include: includes,
     exclude_response_fields: ['description', 'rubric'],
-    override_assignment_dates: !ENV.PERMISSIONS.manage
+    override_assignment_dates: !ENV.PERMISSIONS.manage,
+    per_page: 50
   },
   courseSubmissionsURL: ENV.URLS.course_student_submissions_url
 })
@@ -77,7 +78,6 @@ if (ENV.PERMISSIONS.manage_assignments) {
   assignmentSyncSettingsView = new AssignmentSyncSettingsView({
     collection: assignmentGroups,
     model: course,
-    userIsAdmin,
     sisName: ENV.SIS_NAME
   })
 

@@ -22,7 +22,6 @@ describe "new account course search" do
 
   before :once do
     account_model
-    @account.enable_feature!(:course_user_search)
     account_admin_user(:account => @account, :active_all => true)
   end
 
@@ -31,8 +30,13 @@ describe "new account course search" do
   end
 
   def get_rows
-    ff('.courses-list [role=row]')
+    ff('[data-automation="courses list"] tr')
   end
+
+  def wait_for_loading_to_disappear
+    expect(f('[data-automation="courses list"]')).not_to contain_css('tr:nth-child(2)') #wait for ajax
+  end
+
 
   it "should not show the courses tab without permission" do
     @account.role_overrides.create! :role => admin_role, :permission => 'read_course_list', :enabled => false
@@ -41,47 +45,45 @@ describe "new account course search" do
     expect(f("#left-side #section-tabs")).not_to include_text("Courses")
   end
 
-  it "should hide courses without enrollments if checked" do
+  it "should hide courses without enrollments if checked", test_id: 3454769, priority: 1 do
     empty_course = course_factory(:account => @account, :course_name => "no enrollments")
     not_empty_course = course_factory(:account => @account, :course_name => "yess enrollments", :active_all => true)
     student_in_course(:course => not_empty_course, :active_all => true)
 
     get "/accounts/#{@account.id}"
 
-    expect(get_rows.count).to eq 2
+    rows = get_rows
+    expect(rows.count).to eq 2
+    expect(rows[0]).to include_text(empty_course.name)
+    expect(rows[1]).to include_text(not_empty_course.name)
 
-    cb = f('.course_search_bar input[type=checkbox]')
-    move_to_click("label[for=#{cb['id']}]")
-
-    expect(f('.courses-list')).not_to contain_jqcss('div[role=row]:nth-child(2)')
+    fj('label:contains("Hide courses without students")').click
+    wait_for_loading_to_disappear
 
     rows = get_rows
     expect(rows.count).to eq 1
-    expect(rows.first).to include_text(not_empty_course.name)
-    expect(rows.first).not_to include_text(empty_course.name)
+    expect(rows[0]).to include_text(not_empty_course.name)
+    expect(rows[0]).not_to include_text(empty_course.name)
   end
 
-  it "should paginate" do
+  it "should paginate", test_id: 3454771, priority: 1 do
     16.times { |i| @account.courses.create!(:name => "course #{i + 1}") }
 
-    # slowness has been identified, remove timeout exception after CORE-712 is merged.
-    with_timeouts(script: 10) { get "/accounts/#{@account.id}" }
+    get "/accounts/#{@account.id}"
 
     expect(get_rows.count).to eq 15
     expect(get_rows.first).to include_text("course 1")
-    expect(f(".courses-list")).not_to include_text("course 16")
+    expect(f('[data-automation="courses list"]')).not_to include_text("course 16")
     expect(f("#content")).not_to contain_css('button[title="Previous Page"]')
 
-    f('button[title="Next Page"]').click
+    fj('nav button:contains("2")').click
     wait_for_ajaximations
 
     expect(get_rows.count).to eq 1
     expect(get_rows.first).to include_text("course 16")
-    expect(f("#content")).to contain_css('button[title="Previous Page"]')
-    expect(f("#content")).not_to contain_css('button[title="Next Page"]')
   end
 
-  it "should search by term" do
+  it "should search by term", test_id: 3454772, priority: 1 do
     term = @account.enrollment_terms.create!(:name => "some term")
     term_course = course_factory(:account => @account, :course_name => "term course_factory")
     term_course.enrollment_term = term
@@ -91,8 +93,8 @@ describe "new account course search" do
 
     get "/accounts/#{@account.id}"
 
-    click_option(".course_search_bar select", term.name)
-    expect(f('.courses-list')).not_to contain_jqcss('div[role=row]:nth-child(2)')
+    click_option('select:has([label="Show courses from"])', term.name)
+    wait_for_loading_to_disappear
 
     rows = get_rows
     expect(rows.count).to eq 1
@@ -105,8 +107,8 @@ describe "new account course search" do
 
     get "/accounts/#{@account.id}"
 
-    f('.course_search_bar input[type=search]').send_keys('search')
-    expect(f('.courses-list')).not_to contain_jqcss('div[role=row]:nth-child(2)')
+    f('input[placeholder="Search courses..."]').send_keys('search')
+    wait_for_loading_to_disappear
 
     rows = get_rows
     expect(rows.count).to eq 1
@@ -119,7 +121,7 @@ describe "new account course search" do
     named_course.save
     get "/accounts/#{@account.id}"
 
-    f('.courses-list a').click
+    fj("[data-automation='courses list'] tr a:contains(#{named_course.name})").click
     wait_for_ajax_requests
     expect(f("#content h2")).to include_text named_course.name
   end
@@ -128,9 +130,9 @@ describe "new account course search" do
     bogus = 'jtsdumbthing'
     get "/accounts/#{@account.id}"
 
-    f('.course_search_bar input[type=search]').send_keys(bogus)
+    f('input[placeholder="Search courses..."]').send_keys(bogus)
 
-    expect(f("#content")).not_to contain_css('.courses-list [role=row]')
+    expect(f("#content")).not_to contain_css("[data-automation='courses list'] tr")
   end
 
   it "should show teachers" do
@@ -140,9 +142,8 @@ describe "new account course search" do
 
     get "/accounts/#{@account.id}"
 
-    user_link = get_rows.first.find("a.user_link")
+    user_link = get_rows.first.find("a[href='#{user_url(@user)}']")
     expect(user_link).to include_text(@user.name)
-    expect(user_link['href']).to eq user_url(@user)
   end
 
   it "should show manageable roles in new enrollment dialog" do
@@ -154,7 +155,8 @@ describe "new account course search" do
 
     get "/accounts/#{@account.id}"
 
-    fj('.courses-list [role=row] button:has([name="IconPlusLine"])').click
+    el = get_rows.first.find('[name="IconPlus"]')
+    move_to_click_element(el)
 
     dialog = fj('#add_people_modal:visible')
     expect(dialog).to be_displayed
@@ -170,25 +172,26 @@ describe "new account course search" do
     # when the "+ users" is clicked and not as part of the page load
     sections = ('A'..'Z').map { |i| course.course_sections.create!(:name => "Test Section #{i}") }
 
-    fj('.courses-list [role=row] button:has([name="IconPlusLine"])').click # click the "+" to open addPeople
+    el = get_rows.first.find('[name="IconPlus"]')
+    move_to_click_element(el)
     section_options = ffj('#add_people_modal:visible #peoplesearch_select_section option')
     expect(section_options.map(&:text)).to eq(sections.map(&:name))
   end
 
-  it "should create a new course from the 'Add a New Course' dialog" do
+  it "should create a new course from the 'Add a New Course' dialog", test_id: 3454775, priority: 1 do
     @account.enrollment_terms.create!(:name => "Test Enrollment Term")
     subaccount = @account.sub_accounts.create!(name: "Test Sub Account")
 
     get "/accounts/#{@account.id}"
 
     # fill out the form
-    f('.selenium-spec-add-course-button').click
-    dialog = f('.ReactModal__Content--canvas')
+    fj('button:has([name="IconPlus"]):contains("Course")').click
+    dialog = f('[aria-label="Add a New Course"]')
     expect(dialog).to be_displayed
-    set_value(f('.name', dialog), 'Test Course Name')
-    set_value(f('.course_code', dialog), 'TCN 101')
-    click_option(".account_id", subaccount.to_param, :value)
-    click_option(".enrollment_term_id", "Test Enrollment Term")
+    set_value(fj('label:contains("Course Name") input', dialog), 'Test Course Name')
+    set_value(fj('label:contains("Reference Code") input', dialog), 'TCN 101')
+    click_option('[aria-label="Add a New Course"] label:contains("Subaccount") select', subaccount.to_param, :value)
+    click_option('[aria-label="Add a New Course"] label:contains("Enrollment Term") select', "Test Enrollment Term")
     submit_form(dialog)
 
     # make sure it got saved to db correctly
@@ -199,14 +202,15 @@ describe "new account course search" do
     expect(new_course.enrollment_term.name).to eq('Test Enrollment Term')
 
     # make sure it shows up on the page
-    expect(f('.courses-list')).to include_text('Test Course Name')
+    expect(get_rows.first).to include_text('Test Course Name')
   end
 
   it "should list course name at top of add user modal", priority: "1", test_id: 3391719 do
     named_course = course_factory(:account => @account, :course_name => "course factory with name")
 
     get "/accounts/#{@account.id}"
-    fj('.courses-list [role=row] button:has([name="IconPlusLine"])').click # click the "+" to open addPeople
+    el = get_rows.first.find('[name="IconPlus"]')
+    move_to_click_element(el)
     expect(f('#add_people_modal h2')).to include_text(named_course.name)
   end
 end

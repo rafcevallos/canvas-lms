@@ -23,19 +23,19 @@ import GradeFormatHelper from 'jsx/gradebook/shared/helpers/GradeFormatHelper'
 QUnit.module('GradeFormatHelper#formatGrade', {
   setup () {
     this.translateString = I18n.t;
-    this.stub(numberHelper, 'validate').callsFake(val => !isNaN(parseFloat(val)));
-    this.stub(I18n, 't').callsFake(this.translateString);
+    sandbox.stub(numberHelper, 'validate').callsFake(val => !isNaN(parseFloat(val)));
+    sandbox.stub(I18n, 't').callsFake(this.translateString);
   }
 });
 
 test('uses I18n#n to format numerical integer grades', function () {
-  this.stub(I18n, 'n').withArgs(1000).returns('* 1,000');
+  sandbox.stub(I18n, 'n').withArgs(1000).returns('* 1,000');
   equal(GradeFormatHelper.formatGrade(1000), '* 1,000');
   equal(I18n.n.callCount, 1);
 });
 
 test('uses I18n#n to format numerical decimal grades', function () {
-  this.stub(I18n, 'n').withArgs(123.45).returns('* 123.45');
+  sandbox.stub(I18n, 'n').withArgs(123.45).returns('* 123.45');
   equal(GradeFormatHelper.formatGrade(123.45), '* 123.45');
   equal(I18n.n.callCount, 1);
 });
@@ -62,11 +62,11 @@ test('uses I18n#t to format pass_fail based grades: fail', function () {
 
 test('returns "Excused" when the grade is "EX"', function () {
   // this is for backwards compatibility for users who depend on this behavior
-  equal('Excused', GradeFormatHelper.formatGrade('EX'));
+  equal(GradeFormatHelper.formatGrade('EX'), 'Excused');
 });
 
 test('parses a stringified integer percentage grade when it is a valid number', function () {
-  this.spy(numberHelper, 'parse');
+  sandbox.spy(numberHelper, 'parse');
   GradeFormatHelper.formatGrade('32%');
   equal(numberHelper.parse.callCount, 1);
   strictEqual(numberHelper.parse.getCall(0).args[0], '32');
@@ -89,7 +89,7 @@ test('returns the given grade when it is numbers followed by letters', function 
 });
 
 test('does not format letter grades', function () {
-  this.spy(I18n, 'n');
+  sandbox.spy(I18n, 'n');
   GradeFormatHelper.formatGrade('A');
   equal(I18n.n.callCount, 0, 'I18n.n was not called');
 });
@@ -119,7 +119,7 @@ test('returns the grade when given an empty string and no defaultValue option', 
 });
 
 test('formats numerical integer grades as percent when given a gradingType of "percent"', function () {
-  this.spy(I18n, 'n');
+  sandbox.spy(I18n, 'n');
   GradeFormatHelper.formatGrade(10, { gradingType: 'percent' });
   const [value, options] = I18n.n.getCall(0).args;
   strictEqual(value, 10);
@@ -127,7 +127,7 @@ test('formats numerical integer grades as percent when given a gradingType of "p
 });
 
 test('formats numerical decimal grades as percent when given a gradingType of "percent"', function () {
-  this.spy(I18n, 'n');
+  sandbox.spy(I18n, 'n');
   GradeFormatHelper.formatGrade(10.1, { gradingType: 'percent' });
   const [value, options] = I18n.n.getCall(0).args;
   strictEqual(value, 10.1);
@@ -135,7 +135,7 @@ test('formats numerical decimal grades as percent when given a gradingType of "p
 });
 
 test('formats string percentage grades as points when given a gradingType of "points"', function () {
-  this.spy(I18n, 'n');
+  sandbox.spy(I18n, 'n');
   GradeFormatHelper.formatGrade('10%', { gradingType: 'points' });
   const [value, options] = I18n.n.getCall(0).args;
   strictEqual(value, 10);
@@ -152,7 +152,7 @@ test('optionally rounds to a given precision', function () {
 });
 
 test('optionally parses grades as non-localized', function () {
-  this.stub(numberHelper, 'parse').withArgs('32.459').returns(32459);
+  sandbox.stub(numberHelper, 'parse').withArgs('32.459').returns(32459);
   const formatted = GradeFormatHelper.formatGrade('32.459', { delocalize: false });
 
   strictEqual(numberHelper.parse.callCount, 0);
@@ -210,25 +210,25 @@ test('parses stringified decimal percentages', function () {
 });
 
 test('uses numberHelper.parse to parse a stringified integer grade', function () {
-  this.spy(numberHelper, 'parse');
+  sandbox.spy(numberHelper, 'parse');
   GradeFormatHelper.parseGrade('123');
   equal(numberHelper.parse.callCount, 1);
 });
 
 test('uses numberHelper.parse to parse a stringified decimal grade', function () {
-  this.spy(numberHelper, 'parse');
+  sandbox.spy(numberHelper, 'parse');
   GradeFormatHelper.parseGrade('123.456');
   equal(numberHelper.parse.callCount, 1);
 });
 
 test('uses numberHelper.parse to parse a stringified integer percentage', function () {
-  this.spy(numberHelper, 'parse');
+  sandbox.spy(numberHelper, 'parse');
   GradeFormatHelper.parseGrade('123%');
   equal(numberHelper.parse.callCount, 1);
 });
 
 test('uses numberHelper.parse to parse a stringified decimal percentage', function () {
-  this.spy(numberHelper, 'parse');
+  sandbox.spy(numberHelper, 'parse');
   GradeFormatHelper.parseGrade('123.456%');
   equal(numberHelper.parse.callCount, 1);
 });
@@ -258,7 +258,7 @@ test('returns an empty string when given an empty string', function () {
 });
 
 test('optionally parses grades without delocalizing', function () {
-  this.spy(numberHelper, 'parse');
+  sandbox.spy(numberHelper, 'parse');
   GradeFormatHelper.parseGrade('123', { delocalize: false });
   equal(numberHelper.parse.callCount, 0);
 });
@@ -309,6 +309,44 @@ QUnit.module('GradeFormatHelper', (suiteHooks) => {
       strictEqual(GradeFormatHelper.isExcused('A'), false);
     });
   });
+
+  QUnit.module('.formatGradeInfo()', hooks => {
+    let options
+    let gradeInfo
+
+    function formatGradeInfo() {
+      return GradeFormatHelper.formatGradeInfo(gradeInfo, options)
+    }
+
+    hooks.beforeEach(() => {
+      gradeInfo = {enteredAs: 'points', excused: false, grade: 'A', score: 10, valid: true}
+    })
+
+    test('returns the grade when the pending grade is valid', () => {
+      strictEqual(formatGradeInfo(), 'A')
+    })
+
+    test('returns the grade when the pending grade is invalid', () => {
+      gradeInfo.valid = false
+      strictEqual(formatGradeInfo(), 'A')
+    })
+
+    test('returns "–" (en dash) when the pending grade is null', () => {
+      gradeInfo = {enteredAs: null, excused: false, grade: null, score: null, valid: true}
+      strictEqual(formatGradeInfo(), '–')
+    })
+
+    test('returns the given default value when the pending grade is null', () => {
+      options = {defaultValue: 'default'}
+      gradeInfo = {enteredAs: null, excused: false, grade: null, score: null, valid: true}
+      strictEqual(formatGradeInfo(), 'default')
+    })
+
+    test('returns "Excused" when the pending grade info includes excused', () => {
+      gradeInfo = {enteredAs: 'excused', excused: true, grade: null, score: null, valid: true}
+      strictEqual(formatGradeInfo(), 'Excused')
+    })
+  })
 
   QUnit.module('.formatSubmissionGrade', (hooks) => {
     let options;
@@ -383,16 +421,28 @@ QUnit.module('GradeFormatHelper', (suiteHooks) => {
         strictEqual(GradeFormatHelper.formatSubmissionGrade(submission, options), '7.33');
       });
 
-      test('returns "–" (emdash) when the score is null', () => {
+      test('returns "–" (en dash) when the score is null', () => {
         submission.score = null;
         equal(GradeFormatHelper.formatSubmissionGrade(submission, options), '–');
       });
 
-      test('returns "–" (emdash) for the "entered" version when the entered score is null', () => {
+      test('returns "–" (en dash) for the "entered" version when the entered score is null', () => {
         submission.enteredScore = null;
         options.version = 'entered';
         equal(GradeFormatHelper.formatSubmissionGrade(submission, options), '–');
       });
+
+      test('returns the given default value for "final" when the final score is null', () => {
+        submission.score = null
+        options = {...options, version: 'final', defaultValue: 'default'}
+        equal(GradeFormatHelper.formatSubmissionGrade(submission, options), 'default')
+      })
+
+      test('returns the given default value for "entered" when the entered score is null', () => {
+        submission.enteredScore = null
+        options = {...options, version: 'entered', defaultValue: 'default'}
+        equal(GradeFormatHelper.formatSubmissionGrade(submission, options), 'default')
+      })
     });
 
     QUnit.module('when formatting as "percentage"', (contextHooks) => {
@@ -403,6 +453,14 @@ QUnit.module('GradeFormatHelper', (suiteHooks) => {
       test('divides the score from the assignment points possible', () => {
         equal(GradeFormatHelper.formatSubmissionGrade(submission, options), '68%');
       });
+
+      test('avoids floating point calculation issues when computing the percent', () => {
+        submission.score = 946.65
+        options.pointsPossible = 1000
+        const floatingPointResult = 946.65 / 1000 * 100
+        strictEqual(floatingPointResult, 94.66499999999999)
+        strictEqual(GradeFormatHelper.formatSubmissionGrade(submission, options), '94.67%');
+      })
 
       test('uses the "final" score when explicitly specified', () => {
         options.version = 'final';
@@ -429,12 +487,12 @@ QUnit.module('GradeFormatHelper', (suiteHooks) => {
         equal(GradeFormatHelper.formatSubmissionGrade(submission, options), '78.84%');
       });
 
-      test('returns "–" (emdash) when the score is null', () => {
+      test('returns "–" (en dash) when the score is null', () => {
         submission.score = null;
         equal(GradeFormatHelper.formatSubmissionGrade(submission, options), '–');
       });
 
-      test('returns "–" (emdash) for the "entered" version when the entered score is null', () => {
+      test('returns "–" (en dash) for the "entered" version when the entered score is null', () => {
         submission.enteredScore = null;
         options.version = 'entered';
         equal(GradeFormatHelper.formatSubmissionGrade(submission, options), '–');
@@ -468,6 +526,15 @@ QUnit.module('GradeFormatHelper', (suiteHooks) => {
         equal(GradeFormatHelper.formatSubmissionGrade(submission, options), 'D');
       });
 
+      test('avoids floating point calculation issues when computing the percent', () => {
+        options.gradingScheme = [['A', 0.94665], ['F', 0]]
+        submission.score = 946.65
+        options.pointsPossible = 1000
+        const floatingPointResult = 946.65 / 1000 * 100
+        strictEqual(floatingPointResult, 94.66499999999999)
+        equal(GradeFormatHelper.formatSubmissionGrade(submission, options), 'A')
+      })
+
       test('uses the "final" score when explicitly specified', () => {
         options.version = 'final';
         equal(GradeFormatHelper.formatSubmissionGrade(submission, options), 'D');
@@ -483,12 +550,12 @@ QUnit.module('GradeFormatHelper', (suiteHooks) => {
         equal(GradeFormatHelper.formatSubmissionGrade(submission, options), 'D');
       });
 
-      test('returns "–" (emdash) when the score is null', () => {
+      test('returns "–" (en dash) when the score is null', () => {
         submission.score = null;
         equal(GradeFormatHelper.formatSubmissionGrade(submission, options), '–');
       });
 
-      test('returns "–" (emdash) for the "entered" version when the entered score is null', () => {
+      test('returns "–" (en dash) for the "entered" version when the entered score is null', () => {
         submission.enteredScore = null;
         options.version = 'entered';
         equal(GradeFormatHelper.formatSubmissionGrade(submission, options), '–');
@@ -577,17 +644,6 @@ QUnit.module('GradeFormatHelper', (suiteHooks) => {
         options.version = 'unknown';
         submission.score = 0; // "final" score is made "incomplete"
         equal(GradeFormatHelper.formatSubmissionGrade(submission, options), 'Incomplete');
-      });
-
-      test('returns "ungraded" when the score is null', () => {
-        submission.score = null;
-        equal(GradeFormatHelper.formatSubmissionGrade(submission, options), 'ungraded');
-      });
-
-      test('returns "ungraded" for the "entered" version when the entered score is null', () => {
-        submission.enteredScore = null;
-        options.version = 'entered';
-        equal(GradeFormatHelper.formatSubmissionGrade(submission, options), 'ungraded');
       });
     });
 

@@ -238,21 +238,6 @@ describe Pseudonym do
       pseudonym_model
     end
 
-    it "should offer login as the unique id" do
-      expect(@pseudonym.login).to eql(@pseudonym.unique_id)
-    end
-
-    it "should be able to set the login" do
-      @pseudonym.login = 'another'
-      expect(@pseudonym.login).to eql('another')
-      expect(@pseudonym.unique_id).to eql('another')
-    end
-
-    it "should know if the login changed" do
-      @pseudonym.login = 'another'
-      expect(@pseudonym.login_changed?).to be_truthy
-    end
-
     it "should offer the user code as the user's uuid" do
       expect(@pseudonym.user).to eql(@user)
       expect(@pseudonym.user_code).to eql(@user.uuid)
@@ -374,7 +359,7 @@ describe Pseudonym do
 
   context 'cas' do
     let!(:cas_ticket) { CanvasUuid::Uuid.generate_securish_uuid }
-    let!(:redis_key) { "cas_session:#{cas_ticket}" }
+    let!(:redis_key) { "cas_session_slo:#{cas_ticket}" }
 
     before(:once) do
       user_with_pseudonym
@@ -385,32 +370,17 @@ describe Pseudonym do
       allow(Canvas.redis).to receive(:ttl).and_return(1.day)
     end
 
-    it 'should claim a cas ticket' do
-      expect(Canvas.redis).to receive(:expire).with(redis_key, 1.day).and_return(false).once
-      expect(Canvas.redis).to receive(:set).with(redis_key, @pseudonym.global_id, { ex: 1.day, nx: true }).once
-      @pseudonym.claim_cas_ticket(cas_ticket)
-    end
-
-    it 'should refresh a cas ticket' do
-      expect(Canvas.redis).to receive(:expire).with(redis_key, 1.day).and_return(true).once
-      expect(Canvas.redis).to receive(:setex).never
-      @pseudonym.claim_cas_ticket(cas_ticket)
-    end
-
     it 'should check cas ticket expiration' do
-      expect(Canvas.redis).to receive(:get).with(redis_key).and_return(@pseudonym.global_id.to_s)
+      expect(Canvas.redis).to receive(:get).with(redis_key).and_return(nil)
       expect(@pseudonym.cas_ticket_expired?(cas_ticket)).to be_falsey
 
-      expect(Canvas.redis).to receive(:get).with(redis_key).and_return(Pseudonym::CAS_TICKET_EXPIRED)
+      expect(Canvas.redis).to receive(:get).with(redis_key).and_return(true)
       expect(@pseudonym.cas_ticket_expired?(cas_ticket)).to be_truthy
     end
 
     it 'should expire a cas ticket' do
-      expect(Canvas.redis).to receive(:getset).once.and_return(@pseudonym.global_id.to_s)
+      expect(Canvas.redis).to receive(:set).once.and_return(true)
       expect(Pseudonym.expire_cas_ticket(cas_ticket)).to be_truthy
-
-      expect(Canvas.redis).to receive(:getset).once.and_return(Pseudonym::CAS_TICKET_EXPIRED)
-      expect(Pseudonym.expire_cas_ticket(cas_ticket)).to be_falsey
     end
   end
 

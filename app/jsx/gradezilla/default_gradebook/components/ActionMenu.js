@@ -19,11 +19,10 @@
 import $ from 'jquery'
 import React from 'react'
 import PropTypes from 'prop-types'
-import IconMiniArrowDownSolid from 'instructure-icons/lib/Solid/IconMiniArrowDownSolid'
-import Button from '@instructure/ui-core/lib/components/Button'
-import { MenuItem, MenuItemSeparator } from '@instructure/ui-core/lib/components/Menu'
-import PopoverMenu from '@instructure/ui-core/lib/components/PopoverMenu'
-import Text from '@instructure/ui-core/lib/components/Text'
+import IconMiniArrowDownSolid from '@instructure/ui-icons/lib/Solid/IconMiniArrowDown'
+import Button from '@instructure/ui-buttons/lib/components/Button'
+import Menu, { MenuItem, MenuItemSeparator } from '@instructure/ui-menu/lib/components/Menu'
+import Text from '@instructure/ui-elements/lib/components/Text'
 import GradebookExportManager from '../../../gradezilla/shared/GradebookExportManager'
 import { AppLaunch } from '../../../gradezilla/SISGradePassback/PostGradesApp'
 import tz from 'timezone'
@@ -77,12 +76,10 @@ const { arrayOf, bool, func, object, shape, string } = PropTypes;
       publishGradesToSis: shape({
         isEnabled: bool.isRequired,
         publishToSisUrl: string
-      })
-    };
+      }),
 
-    static downloadableLink (url) {
-      return `${url}&download_frd=1`;
-    }
+      gradingPeriodId: string.isRequired
+    };
 
     static gotoUrl (url) {
       window.location.href = url;
@@ -128,7 +125,7 @@ const { arrayOf, bool, func, object, shape, string } = PropTypes;
       this.setExportInProgress(true);
       $.flashMessage(I18n.t('Gradebook export started'));
 
-      return this.exportManager.startExport().then((resolution) => {
+      return this.exportManager.startExport(this.props.gradingPeriodId).then((resolution) => {
         this.setExportInProgress(false);
 
         const attachmentUrl = resolution.attachmentUrl;
@@ -136,7 +133,7 @@ const { arrayOf, bool, func, object, shape, string } = PropTypes;
 
         const previousExport = {
           label: `${I18n.t('New Export')} (${DateHelper.formatDatetimeForDisplay(updatedAt)})`,
-          attachmentUrl: ActionMenu.downloadableLink(attachmentUrl)
+          attachmentUrl
         };
 
         this.setState({ previousExport });
@@ -188,7 +185,7 @@ const { arrayOf, bool, func, object, shape, string } = PropTypes;
 
       return {
         label: `${I18n.t('Previous Export')} (${DateHelper.formatDatetimeForDisplay(updatedAt)})`,
-        attachmentUrl: ActionMenu.downloadableLink(attachment.downloadUrl)
+        attachmentUrl: attachment.downloadUrl
       };
     }
 
@@ -285,7 +282,7 @@ const { arrayOf, bool, func, object, shape, string } = PropTypes;
       const publishGradesToSis = this.renderPublishGradesToSis();
 
       return (
-        <PopoverMenu
+        <Menu
           trigger={
             <Button variant="link">
               <Text {...buttonTypographyProps}>
@@ -308,7 +305,7 @@ const { arrayOf, bool, func, object, shape, string } = PropTypes;
           </MenuItem>
 
           { [...this.renderPreviousExports()] }
-        </PopoverMenu>
+        </Menu>
       );
     }
   }

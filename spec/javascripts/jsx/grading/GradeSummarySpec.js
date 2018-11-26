@@ -19,13 +19,14 @@
 define([
   'lodash',
   'jquery',
+  'react',
   'i18n!gradebook',
   'helpers/fakeENV',
   '../gradebook/GradeCalculatorSpecHelper',
   'jsx/shared/helpers/numberHelper',
   'jsx/gradebook/CourseGradeCalculator',
   'jsx/grading/GradeSummary'
-], (_, $, I18n, fakeENV, GradeCalculatorSpecHelper, numberHelper, CourseGradeCalculator, GradeSummary) => {
+], (_, $, React, I18n, fakeENV, GradeCalculatorSpecHelper, numberHelper, CourseGradeCalculator, GradeSummary) => {
   const $fixtures = $('#fixtures');
 
   let exampleGrades;
@@ -316,7 +317,7 @@ define([
     setup () {
       commonSetup();
       ENV.assignment_groups = createAssignmentGroups();
-      this.stub($, 'screenReaderFlashMessageExclusive');
+      sandbox.stub($, 'screenReaderFlashMessageExclusive');
       setPageHtmlFixture();
     },
 
@@ -339,7 +340,7 @@ define([
   });
 
   test('localizes displayed grade', function () {
-    this.stub(I18n, 'n').returns('1,234');
+    sandbox.stub(I18n, 'n').returns('1,234');
     GradeSummary.calculateTotals(createExampleGrades(), 'current', 'percent');
     const $teaser = $fixtures.find('.student_assignment.final_grade .score_teaser');
     ok($teaser.text().includes('1,234'), 'includes internationalized score');
@@ -412,21 +413,26 @@ define([
   QUnit.module('GradeSummary.calculatePercentGrade');
 
   test('returns properly computed and rounded value', function () {
-    const percentGrade = GradeSummary.calculatePercentGrade(1, 3);
-    ok(percentGrade === 33.33);
-  });
+    const percentGrade = GradeSummary.calculatePercentGrade(1, 3)
+    strictEqual(percentGrade, 33.33)
+  })
+
+  test('avoids floating point calculation issues', function () {
+    const percentGrade = GradeSummary.calculatePercentGrade(946.65, 1000)
+    strictEqual(percentGrade, 94.67)
+  })
 
   QUnit.module('GradeSummary.formatPercentGrade');
 
   test('returns an internationalized number value', function () {
-    this.stub(I18n, 'n').withArgs(1234).returns('1,234%');
+    sandbox.stub(I18n, 'n').withArgs(1234).returns('1,234%');
     equal(GradeSummary.formatPercentGrade(1234), '1,234%');
   });
 
   QUnit.module('GradeSummary.calculateGrade');
 
   test('returns an internationalized percentage when given a score and nonzero points possible', function () {
-    this.stub(I18n, 'n').callsFake(number => `${number}%`);
+    sandbox.stub(I18n, 'n').callsFake(number => `${number}%`);
     equal(GradeSummary.calculateGrade(97, 100), '97%');
     equal(I18n.n.getCall(0).args[1].percentage, true);
   });
@@ -453,7 +459,7 @@ define([
       ENV.effective_due_dates = { 201: { 101: { grading_period_id: '701' } } };
       ENV.student_id = '101';
       exampleGrades = GradeCalculatorSpecHelper.createCourseGradesWithGradingPeriods();
-      this.stub(CourseGradeCalculator, 'calculate').returns(exampleGrades);
+      sandbox.stub(CourseGradeCalculator, 'calculate').returns(exampleGrades);
     },
 
     teardown () {
@@ -506,13 +512,13 @@ define([
   });
 
   test('returns course grades when no grading period id is provided', function () {
-    this.stub(GradeSummary, 'getSelectedGradingPeriodId').returns(null);
+    sandbox.stub(GradeSummary, 'getSelectedGradingPeriodId').returns(null);
     const grades = GradeSummary.calculateGrades();
     equal(grades, exampleGrades);
   });
 
   test('scopes grades to the provided grading period id', function () {
-    this.stub(GradeSummary, 'getSelectedGradingPeriodId').returns('701');
+    sandbox.stub(GradeSummary, 'getSelectedGradingPeriodId').returns('701');
     const grades = GradeSummary.calculateGrades();
     equal(grades, exampleGrades.gradingPeriods[701]);
   });
@@ -539,7 +545,7 @@ define([
   });
 
   test('uses I18n to parse the .student_entered_score value', function () {
-    this.spy(GradeSummary, 'parseScoreText');
+    sandbox.spy(GradeSummary, 'parseScoreText');
     this.$assignment.find('.student_entered_score').text('7');
     GradeSummary.setup();
     equal(GradeSummary.parseScoreText.callCount, 1, 'GradeSummary.parseScoreText was called once');
@@ -594,7 +600,7 @@ define([
   });
 
   test('triggers onScoreChange for the assignment', function () {
-    this.stub(GradeSummary, 'onScoreChange');
+    sandbox.stub(GradeSummary, 'onScoreChange');
     this.$showWhatIfScoresButton.click();
     equal(GradeSummary.onScoreChange.callCount, 1, 'called once for each assignment (only one in fixture)');
     const [$assignment, options] = GradeSummary.onScoreChange.getCall(0).args;
@@ -603,8 +609,8 @@ define([
   });
 
   test('uses I18n to parse the .student_entered_score value', function () {
-    this.stub(GradeSummary, 'onScoreChange');
-    this.spy(GradeSummary, 'parseScoreText');
+    sandbox.stub(GradeSummary, 'onScoreChange');
+    sandbox.spy(GradeSummary, 'parseScoreText');
     this.$assignment.find('.student_entered_score').text('7');
     this.$showWhatIfScoresButton.click();
     equal(GradeSummary.parseScoreText.callCount, 1, 'GradeSummary.parseScoreText was called once');
@@ -619,7 +625,7 @@ define([
   });
 
   test('ignores assignments without What-If scores', function () {
-    this.stub(GradeSummary, 'onScoreChange');
+    sandbox.stub(GradeSummary, 'onScoreChange');
     this.$assignment.find('.student_entered_score').text('');
     this.$showWhatIfScoresButton.click();
     const $scoreValue = $fixtures.find('.assignment_score .score_value').first();
@@ -629,7 +635,7 @@ define([
   });
 
   test('ignores assignments with invalid What-If score text', function () {
-    this.stub(GradeSummary, 'onScoreChange');
+    sandbox.stub(GradeSummary, 'onScoreChange');
     this.$assignment.find('.student_entered_score').text('null');
     this.$showWhatIfScoresButton.click();
     const $scoreValue = $fixtures.find('.assignment_score .score_value').first();
@@ -649,8 +655,8 @@ define([
   });
 
   test('displays a screenreader message indicating visibility of What-If scores', function () {
-    this.stub(GradeSummary, 'onScoreChange');
-    this.stub($, 'screenReaderFlashMessageExclusive');
+    sandbox.stub(GradeSummary, 'onScoreChange');
+    sandbox.stub($, 'screenReaderFlashMessageExclusive');
     this.$showWhatIfScoresButton.click();
     equal($.screenReaderFlashMessageExclusive.callCount, 1, 'screenReaderFlashMessageExclusive is called once');
     const [message] = $.screenReaderFlashMessageExclusive.getCall(0).args;
@@ -692,28 +698,6 @@ define([
     $('#show_all_details_button').click();
     $('#show_all_details_button').click();
     equal($('#show_all_details_button').text(), 'Show All Details');
-  });
-
-  QUnit.module('GradeSummary.getSelectedGradingPeriodId', {
-    setup () {
-      setPageHtmlFixture();
-      this.$select = document.querySelector('.grading_periods_selector');
-    }
-  });
-
-  test('returns the value of the selected grading period', function () {
-    this.$select.value = '701';
-    equal(GradeSummary.getSelectedGradingPeriodId(), '701');
-  });
-
-  test('returns null when "All Grading Periods" is selected', function () {
-    this.$select.value = '0';
-    deepEqual(GradeSummary.getSelectedGradingPeriodId(), null);
-  });
-
-  test('returns null when the grading periods selector is not present in the DOM', function () {
-    this.$select.parentNode.removeChild(this.$select);
-    deepEqual(GradeSummary.getSelectedGradingPeriodId(), null);
   });
 
   QUnit.module('GradeSummary.onEditWhatIfScore', {
@@ -780,7 +764,7 @@ define([
 
   test('uses I18n to parse the existing "What-If" score', function () {
     $fixtures.find('.assignment_score').first().find('.what_if_score').text('1.234,56');
-    this.stub(numberHelper, 'parse').withArgs('1.234,56').returns('654321');
+    sandbox.stub(numberHelper, 'parse').withArgs('1.234,56').returns('654321');
     this.onEditWhatIfScore();
     const $gradeEntry = $fixtures.find('#grade_entry').first();
     equal($gradeEntry.val(), '654321', 'the previous "What-If" score might have been internationalized');
@@ -813,7 +797,7 @@ define([
   QUnit.module('GradeSummary.onScoreChange', {
     setup () {
       fullPageSetup();
-      this.stub($, 'ajaxJSON');
+      sandbox.stub($, 'ajaxJSON');
       this.$assignment = $fixtures.find('#grades_summary .student_assignment').first();
       // reproduce the destructive part of .onEditWhatIfScore
       this.$assignment.find('.assignment_score').find('.grade').empty().append($('#grade_entry'));
@@ -835,7 +819,7 @@ define([
   });
 
   test('uses I18n to parse the #grade_entry score', function () {
-    this.stub(numberHelper, 'parse').withArgs('1.234,56').returns('654321');
+    sandbox.stub(numberHelper, 'parse').withArgs('1.234,56').returns('654321');
     this.onScoreChange('1.234,56');
     equal(this.$assignment.find('.what_if_score').text(), '654321');
   });
@@ -847,7 +831,7 @@ define([
   });
 
   test('uses I18n to parse the previous .what_if_score value', function () {
-    this.stub(numberHelper, 'parse').withArgs('9.0').returns('654321');
+    sandbox.stub(numberHelper, 'parse').withArgs('9.0').returns('654321');
     this.$assignment.find('.what_if_score').text('9.0');
     this.onScoreChange('');
     equal(this.$assignment.find('.what_if_score').text(), '654321');
@@ -930,7 +914,7 @@ define([
   });
 
   test('updates the score for the given assignment', function () {
-    this.stub(GradeSummary, 'updateScoreForAssignment');
+    sandbox.stub(GradeSummary, 'updateScoreForAssignment');
     this.onScoreChange('5');
     equal(GradeSummary.updateScoreForAssignment.callCount, 1);
     const [assignmentId, score] = GradeSummary.updateScoreForAssignment.getCall(0).args;
@@ -1016,7 +1000,7 @@ define([
   });
 
   test('updates the score for the assignment', function () {
-    this.stub(GradeSummary, 'updateScoreForAssignment');
+    sandbox.stub(GradeSummary, 'updateScoreForAssignment');
     this.onScoreRevert();
     equal(GradeSummary.updateScoreForAssignment.callCount, 1);
     const [assignmentId, score] = GradeSummary.updateScoreForAssignment.getCall(0).args;
@@ -1026,15 +1010,15 @@ define([
 
   test('updates the score for the assignment with null when the .original_points is blank', function () {
     this.$assignment.find('.original_points').text('');
-    this.stub(GradeSummary, 'updateScoreForAssignment');
+    sandbox.stub(GradeSummary, 'updateScoreForAssignment');
     this.onScoreRevert();
     const score = GradeSummary.updateScoreForAssignment.getCall(0).args[1];
     strictEqual(score, null);
   });
 
   test('updates the student grades after updating the assignment score', function () {
-    this.stub(GradeSummary, 'updateScoreForAssignment');
-    this.stub(GradeSummary, 'updateStudentGrades').callsFake(() => {
+    sandbox.stub(GradeSummary, 'updateScoreForAssignment');
+    sandbox.stub(GradeSummary, 'updateStudentGrades').callsFake(() => {
       equal(GradeSummary.updateScoreForAssignment.callCount, 1, 'updateScoreForAssignment is performed first');
     });
     this.onScoreRevert();
@@ -1097,27 +1081,25 @@ define([
   });
 
   test('returns an empty string if grading periods are weighted and "All Grading Periods" is selected', function () {
-    sinon.stub(GradeSummary, 'getSelectedGradingPeriodId').returns(null);
     ENV.grading_period_set = {
       id: '1501',
       grading_periods: [{ id: '701', weight: 50 }, { id: '702', weight: 50 }],
       weighted: true
-    };
-    const text = GradeSummary.finalGradePointsPossibleText('equal', '50.00 / 100.00');
-    strictEqual(text, '');
-    GradeSummary.getSelectedGradingPeriodId.restore();
+    }
+    ENV.current_grading_period_id = '0'
+    const text = GradeSummary.finalGradePointsPossibleText('equal', '50.00 / 100.00')
+    strictEqual(text, '')
   });
 
   test('returns the score with points possible if grading periods are weighted and a period is selected', function () {
-    sinon.stub(GradeSummary, 'getSelectedGradingPeriodId').returns('701');
     ENV.grading_period_set = {
       id: '1501',
       grading_periods: [{ id: '701', weight: 50 }, { id: '702', weight: 50 }],
       weighted: true
-    };
-    const text = GradeSummary.finalGradePointsPossibleText('equal', '50.00 / 100.00');
-    strictEqual(text, '50.00 / 100.00');
-    GradeSummary.getSelectedGradingPeriodId.restore();
+    }
+    ENV.current_grading_period_id = '701'
+    const text = GradeSummary.finalGradePointsPossibleText('equal', '50.00 / 100.00')
+    strictEqual(text, '50.00 / 100.00')
   });
 
   test('returns the score with points possible if grading periods are not weighted', function () {
@@ -1130,4 +1112,174 @@ define([
     const text = GradeSummary.finalGradePointsPossibleText('equal', '50.00 / 100.00');
     strictEqual(text, '50.00 / 100.00');
   });
+
+  QUnit.module('GradeSummary', () => {
+    QUnit.module('.getSelectedGradingPeriodId', (hooks) => {
+      hooks.beforeEach(() => {
+        fakeENV.setup()
+      })
+
+      hooks.afterEach(() => {
+        fakeENV.teardown()
+      })
+
+      test('returns the id of the current grading period', () => {
+        ENV.current_grading_period_id = '701'
+
+        strictEqual(GradeSummary.getSelectedGradingPeriodId(), '701')
+      })
+
+      test('returns null when the current grading period is "All Grading Periods"', () => {
+        ENV.current_grading_period_id = '0'
+
+        strictEqual(GradeSummary.getSelectedGradingPeriodId(), null)
+      })
+
+      test('returns null when there is no current grading period', () => {
+        strictEqual(GradeSummary.getSelectedGradingPeriodId(), null)
+      })
+    });
+
+    QUnit.module('#renderSelectMenuGroup', hooks => {
+      const props = {
+        assignmentSortOptions: [],
+        courses: [],
+        currentUserID: '42',
+        displayPageContent() {},
+        goToURL() {},
+        gradingPeriods: [],
+        saveAssignmentOrder() {},
+        selectedAssignmentSortOrder: '1',
+        selectedCourseID: '2',
+        selectedGradingPeriodID: '3',
+        selectedStudentID: '4',
+        students: []
+      }
+
+      hooks.beforeEach(() => {
+        sinon.stub(GradeSummary, 'getSelectMenuGroupProps').returns(props)
+        fakeENV.setup({context_asset_string: 'course_42', current_user: {}})
+      })
+
+      hooks.afterEach(() => {
+        fakeENV.teardown()
+        GradeSummary.getSelectMenuGroupProps.restore()
+      })
+
+      test('calls getSelectMenuGroupProps', () => {
+        $('#fixtures').html('<div id="GradeSummarySelectMenuGroup"></div>')
+        GradeSummary.renderSelectMenuGroup()
+
+        strictEqual(GradeSummary.getSelectMenuGroupProps.callCount, 1)
+      })
+    })
+
+    QUnit.module('#getSelectMenuGroupProps', hooks => {
+      hooks.beforeEach(() => {
+        fakeENV.setup({
+          context_asset_string: 'course_42',
+          current_user: {},
+          courses_with_grades: []
+        })
+      })
+
+      hooks.afterEach(() => {
+        fakeENV.teardown()
+      })
+
+      test('sets assignmentSortOptions to the assignment_sort_options environment variable', () => {
+        ENV.assignment_sort_options = [
+          ['Assignment Group', 'assignment_group'],
+          ['Due Date', 'due_at'],
+          ['Title', 'title']
+        ]
+
+        deepEqual(
+          GradeSummary.getSelectMenuGroupProps().assignmentSortOptions,
+          ENV.assignment_sort_options
+        )
+      })
+
+      test('sets courses to camelized version of courses_with_grades', () => {
+        ENV.courses_with_grades = [
+          {grading_period_set: null, id: '15', nickname: 'Course #1', url: '/courses/15/grades'},
+          {grading_period_set: 3, id: '42', nickname: 'Course #2', url: '/courses/42/grades'}
+        ]
+
+        const expectedCourses = [
+          {gradingPeriodSet: null, id: '15', nickname: 'Course #1', url: '/courses/15/grades'},
+          {gradingPeriodSet: 3, id: '42', nickname: 'Course #2', url: '/courses/42/grades'}
+        ]
+
+        deepEqual(GradeSummary.getSelectMenuGroupProps().courses, expectedCourses)
+      })
+
+      test('sets currentUserID to the current user id as set in the environment', () => {
+        ENV.current_user = {id: 42}
+
+        strictEqual(GradeSummary.getSelectMenuGroupProps().currentUserID, 42)
+      })
+
+      test('sets gradingPeriods to the grading period data passed in the environment', () => {
+        ENV.grading_periods = [
+          {
+            id: '6',
+            close_date: '2017-09-01T05:59:59Z',
+            end_date: '2017-09-01T05:59:59Z',
+            is_closed: true,
+            is_last: false,
+            permissions: {
+              create: false,
+              delete: false,
+              read: true,
+              update: false
+            },
+            start_date: '2017-08-01T06:00:00Z',
+            title: 'Summer 2017',
+            weight: 10
+          }
+        ]
+
+        deepEqual(GradeSummary.getSelectMenuGroupProps().gradingPeriods, ENV.grading_periods)
+      })
+
+      test('sets gradingPeriods to an empty array if there is no grading period data in the environment', () => {
+        deepEqual(GradeSummary.getSelectMenuGroupProps().gradingPeriods, [])
+      })
+
+      test('sets selectedAssignmentSortOrder to the current_assignment_sort_order environment variable', () => {
+        ENV.current_assignment_sort_order = 'due_at'
+
+        strictEqual(
+          GradeSummary.getSelectMenuGroupProps().selectedAssignmentSortOrder,
+          ENV.current_assignment_sort_order
+        )
+      })
+
+      test('sets selectedCourseID to the context id', () => {
+        strictEqual(GradeSummary.getSelectMenuGroupProps().selectedCourseID, '42')
+      })
+
+      test('sets selectedGradingPeriodID to the current_grading_period_id environment variable', () => {
+        ENV.current_grading_period_id = '3'
+
+        strictEqual(
+          GradeSummary.getSelectMenuGroupProps().selectedGradingPeriodID,
+          ENV.current_grading_period_id
+        )
+      })
+
+      test('sets selectedStudentID to the student_id environment variable', () => {
+        ENV.student_id = '66'
+
+        strictEqual(GradeSummary.getSelectMenuGroupProps().selectedStudentID, ENV.student_id)
+      })
+
+      test('sets students to the students environment variable', () => {
+        ENV.students = [{id: 42, name: 'Abel'}, {id: 43, name: 'Baker'}]
+
+        deepEqual(GradeSummary.getSelectMenuGroupProps().students, ENV.students)
+      })
+    })
+  })
 });

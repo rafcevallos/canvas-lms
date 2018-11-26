@@ -55,7 +55,14 @@ class AnnouncementsApiController < ApplicationController
   #   Optional list of resources to include with the response. May include
   #   a string of the name of the resource. Possible values are:
   #   "sections", "sections_user_count"
-  #
+  #   if "sections" is passed, includes the course sections that are associated
+  #   with the topic, if the topic is specific to sertain sections of the course.
+  #   If "sections_user_count" is passed, then:
+  #     (a) If sections were asked for *and* the topic is specific to certain
+  #         course sections sections, includes the number of users in each
+  #         section. (as part of the section json asked for above)
+  #     (b) Else, includes at the root level the total number of users in the
+  #         topic's context (group or course) that the topic applies to.
   # @example_request
   #     curl https://<canvas>/api/v1/announcements?context_codes[]=course_1&context_codes[]=course_2 \
   #          -H 'Authorization: Bearer <token>'
@@ -89,7 +96,7 @@ class AnnouncementsApiController < ApplicationController
     @start_date ||= 14.days.ago.beginning_of_day
     @end_date ||= @start_date + 28.days
     scope = scope.where('COALESCE(delayed_post_at, posted_at, created_at) BETWEEN ? AND ?', @start_date, @end_date)
-    scope = scope.order('COALESCE(delayed_post_at, posted_at, created_at) DESC')
+    scope = scope.order(Arel.sql('COALESCE(delayed_post_at, posted_at, created_at) DESC'))
 
     @topics = Api.paginate(scope, self, api_v1_announcements_url)
 

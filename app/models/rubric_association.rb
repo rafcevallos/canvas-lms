@@ -30,7 +30,7 @@ class RubricAssociation < ActiveRecord::Base
 
   belongs_to :context, polymorphic: [:course, :account]
   has_many :rubric_assessments, :dependent => :nullify
-  has_many :assessment_requests, :dependent => :destroy
+  has_many :assessment_requests, :dependent => :nullify
 
   has_a_broadcast_policy
 
@@ -144,6 +144,11 @@ class RubricAssociation < ActiveRecord::Base
     self.context.grants_right?(assessor, :manage_grades) || self.assessment_requests.incomplete.for_assessee(assessee).pluck(:assessor_id).include?(assessor.id)
   end
 
+  def user_did_assess_for?(assessor: nil, assessee: nil)
+    raise "assessor and assessee required" unless assessor && assessee
+    self.assessment_requests.complete.for_assessee(assessee).for_assessor(assessor).any?
+  end
+
   set_policy do
     given {|user, session| self.context.grants_right?(user, session, :manage_rubrics) }
     can :update and can :delete and can :manage
@@ -213,6 +218,10 @@ class RubricAssociation < ActiveRecord::Base
     raise "association required" unless association || association_object
     # Update/create the association -- this is what ties the rubric to an entity
     update_if_existing = params.delete(:update_if_existing)
+    if params[:hide_points] == '1'
+      params.delete(:use_for_grading)
+      params.delete(:hide_score_total)
+    end
     association ||= rubric.associate_with(association_object, context, :use_for_grading => params[:use_for_grading] == "1", :purpose => params[:purpose], :update_if_existing => update_if_existing)
     association.rubric = rubric
     association.context = context
@@ -225,6 +234,15 @@ class RubricAssociation < ActiveRecord::Base
   def assessments_unique_per_asset?(assessment_type)
     self.association_object.is_a?(Assignment) && self.purpose == "grading" && assessment_type == "grading"
   end
+
+  def assessment_points(criterion, data)
+    if criterion.learning_outcome_id && !self.context.feature_enabled?(:outcome_extra_credit)
+      [criterion.points, data[:points].to_f].min
+    else
+      data[:points].to_f
+    end
+  end
+  protected :assessment_points
 
   def assess(opts={})
     # TODO: what if this is for a group assignment?  Seems like it should
@@ -265,7 +283,7 @@ class RubricAssociation < ActiveRecord::Base
       if data
         replace_ratings = true
         has_score = (data[:points]).present?
-        rating[:points] = data[:points].to_f if has_score
+        rating[:points] = assessment_points(criterion, data) if has_score
         rating[:criterion_id] = criterion.id
         rating[:learning_outcome_id] = criterion.learning_outcome_id
         if criterion.ignore_for_scoring
@@ -318,6 +336,7 @@ class RubricAssociation < ActiveRecord::Base
       assessment.data = ratings if replace_ratings
 
       assessment.set_graded_anonymously if opts[:graded_anonymously]
+      assessment.hide_points = association.hide_points
       assessment.save
       if artifact.is_a?(ModeratedGrading::ProvisionalGrade)
         artifact.submission.touch

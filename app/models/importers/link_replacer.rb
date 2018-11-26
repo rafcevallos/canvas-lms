@@ -53,7 +53,7 @@ module Importers
     def load_questions!(link_map)
       aq_item_keys = link_map.keys.select{|item_key| item_key[:type] == :assessment_question}
       aq_item_keys.each_slice(100) do |item_keys|
-        context.assessment_questions.where(:migration_id => item_keys.map{|ikey| ikey[:migration_id]}).each do |aq|
+        context.assessment_questions.where(:migration_id => item_keys.map{|ikey| ikey[:migration_id]}).preload(:assessment_question_bank).each do |aq|
           item_keys.detect{|ikey| ikey[:migration_id] == aq.migration_id}[:item] = aq
         end
       end
@@ -125,6 +125,9 @@ module Importers
         end
         if item_updates.present?
           item.class.where(:id => item.id).update_all(item_updates)
+            if version = (item.current_version rescue nil)
+              replace_item_placeholders!({:type => :version, :item => version}, {:yaml => field_links.values.flatten})
+            end
         end
 
         unless skip_associations

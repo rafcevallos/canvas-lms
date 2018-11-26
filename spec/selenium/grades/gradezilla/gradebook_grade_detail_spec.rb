@@ -97,7 +97,7 @@ describe 'Grade Detail Tray:' do
 
     it 'late submission has late-by days/hours', test_id: 3337209, priority: '1' do
       late_by_days_value = (@course.students.first.submissions.find_by(assignment_id:@a1.id).
-                              seconds_late/86400.to_f).round(2)
+        seconds_late/86400.to_f).round(2)
 
       expect(Gradezilla::GradeDetailTray.fetch_late_by_value.to_f).to eq late_by_days_value
     end
@@ -151,7 +151,8 @@ describe 'Grade Detail Tray:' do
 
       it 'assignment right arrow loads the next assignment in the tray', test_id: 3337216, priority: '1' do
         Gradezilla::Cells.open_tray(@course.students.first, @a1)
-        Gradezilla::GradeDetailTray.next_assignment_button.click
+        button = Gradezilla::GradeDetailTray.next_assignment_button
+        keep_trying_until { button.click; true } # have to wait for InstUI animations
 
         expect(Gradezilla::GradeDetailTray.assignment_link(@a2.name)).to be_displayed
       end
@@ -179,14 +180,15 @@ describe 'Grade Detail Tray:' do
 
       it 'student right arrow navigates to next student', test_id: 3337223, priority: '1' do
         Gradezilla::Cells.open_tray(@course.students.first, @a1)
-        Gradezilla::GradeDetailTray.next_student_button.click
-
+        button = Gradezilla::GradeDetailTray.next_student_button
+        keep_trying_until { button.click; true } # have to wait for instUI Tray animation
         expect(Gradezilla::GradeDetailTray.student_link(@course.students.second.name)).to be_displayed
       end
 
       it 'student left arrow navigates to previous student', test_id: 3337224, priority: '1' do
         Gradezilla::Cells.open_tray(@course.students.second, @a1)
-        Gradezilla::GradeDetailTray.previous_student_button.click
+        button = Gradezilla::GradeDetailTray.previous_student_button
+        keep_trying_until { button.click; true } # have to wait for instUI Tray animation
 
         expect(Gradezilla::GradeDetailTray.student_link(@course.students.first.name)).to be_displayed
       end
@@ -229,7 +231,9 @@ describe 'Grade Detail Tray:' do
 
       it 'clicking the left arrow loads the previous assignment in the tray', test_id: 3337220, priority: '2' do
         Gradezilla::Cells.open_tray(@course.students.first, @a4)
-        Gradezilla::GradeDetailTray.previous_assignment_button.click
+        button = Gradezilla::GradeDetailTray.previous_assignment_button
+        keep_trying_until { button.click; true } # have to wait for instUI Tray animation
+
 
         expect(Gradezilla::GradeDetailTray.assignment_link(@a3.name)).to be_displayed
       end

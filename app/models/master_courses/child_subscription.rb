@@ -31,7 +31,8 @@ class MasterCourses::ChildSubscription < ActiveRecord::Base
     end
   end
 
-  before_save :check_migration_id_deactivation
+  after_create :link_syllabus!
+  before_update :check_migration_id_deactivation
 
   after_save :invalidate_course_cache
 
@@ -41,7 +42,7 @@ class MasterCourses::ChildSubscription < ActiveRecord::Base
   self.content_tag_association = :child_content_tags
 
   def invalidate_course_cache
-    if self.workflow_state_changed?
+    if self.saved_change_to_workflow_state?
       Rails.cache.delete(self.class.course_cache_key(self.child_course))
     end
   end
@@ -61,9 +62,11 @@ class MasterCourses::ChildSubscription < ActiveRecord::Base
     # mess up the migration ids so restrictions no longer get applied
     if workflow_state_changed?
       if deleted? && workflow_state_was == 'active'
+        self.unlink_syllabus!
         self.add_deactivation_prefix!
       elsif active? && workflow_state_was == 'deleted'
         self.use_selective_copy = false # require a full import next time
+        self.link_syllabus!
         self.remove_deactivation_prefix!
       end
     end
@@ -72,6 +75,16 @@ class MasterCourses::ChildSubscription < ActiveRecord::Base
   def deactivation_prefix
     # a silly string to prepend onto all the bc object migration ids when we deactivate
     "deletedsub_#{self.id}_"
+  end
+
+  def link_syllabus!
+    self.child_course.syllabus_master_template_id = self.master_template_id
+    self.child_course.save!
+  end
+
+  def unlink_syllabus!
+    self.child_course.syllabus_master_template_id = nil
+    self.child_course.save!
   end
 
   def add_deactivation_prefix!

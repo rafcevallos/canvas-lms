@@ -94,7 +94,7 @@ class AssignmentOverrideStudent < ActiveRecord::Base
     AssignmentOverrideStudent
       .where(assignment: assignment)
       .where.not(user_id: valid_student_ids)
-      .each(&:destroy)
+      .each {|aos| aos.assignment_override.skip_broadcasts = true; aos.destroy}
   end
 
   private
@@ -116,6 +116,6 @@ class AssignmentOverrideStudent < ActiveRecord::Base
   end
 
   def update_cached_due_dates
-    DueDateCacher.recompute(assignment) if assignment.present?
+    DueDateCacher.recompute_users_for_course(user_id, assignment.context, [assignment]) if assignment.present?
   end
 end

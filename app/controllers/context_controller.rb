@@ -263,6 +263,9 @@ class ContextController < ApplicationController
         @membership = scope.first
         if @membership
           @enrollments = scope.to_a
+          js_env(COURSE_ID: @context.id,
+                 USER_ID: user_id,
+                 LAST_ATTENDED_DATE: @enrollments.first.last_attended_at)
           log_asset_access(@membership, "roster", "roster")
         end
       elsif @context.is_a?(Group)
@@ -280,6 +283,8 @@ class ContextController < ApplicationController
         redirect_to named_context_url(@context, :context_users_url)
         return
       end
+
+      js_env(CONTEXT_USER_DISPLAY_NAME: @user.short_name)
 
       if @domain_root_account.enable_profiles?
         @user_data = profile_data(

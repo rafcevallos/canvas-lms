@@ -18,46 +18,58 @@
 
 import React from 'react';
 import { shallow } from 'enzyme';
-import UsersPane from 'jsx/account_course_user_search/UsersPane';
+import UsersPane, { SEARCH_DEBOUNCE_TIME } from 'jsx/account_course_user_search/components/UsersPane';
 import UserActions from 'jsx/account_course_user_search/actions/UserActions';
 
 QUnit.module('Account Course User Search UsersPane View');
 
+const fakeStore = () => ({
+  state: {
+    userList: {
+      users: [{}],
+      isLoading: false,
+      errors: {search_term: ''},
+      next: undefined,
+      searchFilter: {search_term: ''},
+      permissions: {},
+      accountId: 1
+    }
+  },
+  dispatch () {},
+  getState () {
+    return this.state
+  },
+  subscribe () {}
+});
+
+const wrapper = store => shallow(
+  <UsersPane
+    store={store}
+    roles={['a']}
+    queryParams={{}}
+    onUpdateQueryParams={function(){}}
+  />
+);
+
 test('handleUpdateSearchFilter dispatches applySearchFilter action', (assert) => {
   const done = assert.async();
-  const fakeStore = {
-    dispatch () {},
-    getState () {
-      return {
-        userList: {
-          users: [],
-          isLoading: true,
-          errors: {search_term: ''},
-          next: undefined,
-          searchFilter: {search_term: ''},
-          timezones: {},
-          permissions: {},
-          accountId: 1
-        },
-      }
-    },
-    subscribe () {}
-  };
-
-  const wrapper = shallow(
-    <UsersPane
-      store={fakeStore}
-      roles={['a']}
-      queryParams={{}}
-      onUpdateQueryParams={function(){}}
-    />
-  );
-
   const spy = sinon.spy(UserActions, 'applySearchFilter');
-  const instance = wrapper.instance();
+  const store = fakeStore()
+  const instance = wrapper(store).instance();
   instance.handleUpdateSearchFilter();
   setTimeout(() => {
     ok(spy.called);
     done();
-  }, 250);
+  }, SEARCH_DEBOUNCE_TIME);
 });
+
+test('have an h1 on the page', () => {
+  const store = fakeStore()
+  equal(wrapper(store).find('h1').length, 1, 'There is one H1 on the page')
+})
+
+test('does not render UserList if loading', () => {
+  const store = fakeStore()
+  store.state.userList.isLoading = true
+  notOk(wrapper(store).find('UsersList').exists())
+})

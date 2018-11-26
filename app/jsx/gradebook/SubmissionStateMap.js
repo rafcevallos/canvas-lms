@@ -17,8 +17,6 @@
  */
 
 import _ from 'underscore'
-import tz from 'timezone'
-import I18n from 'i18n!gradebook'
 import GradingPeriodsHelper from '../grading/helpers/GradingPeriodsHelper'
 
   const TOOLTIP_KEYS = {
@@ -33,8 +31,18 @@ import GradingPeriodsHelper from '../grading/helpers/GradingPeriodsHelper'
     return _.contains(assignment.assignment_visibility, student.id);
   }
 
-  function cellMapForSubmission(assignment, student, hasGradingPeriods, selectedGradingPeriodID, isAdmin) {
-    if (!visibleToStudent(assignment, student)) {
+  function cellMapForSubmission(
+    assignment,
+    student,
+    hasGradingPeriods,
+    selectedGradingPeriodID,
+    isAdmin
+  ) {
+    if (assignment.moderated_grading && !assignment.grades_published) {
+      return { locked: true, hideGrade: false };
+    } else if (assignment.anonymize_students) {
+      return { locked: true, hideGrade: true };
+    } else if (!visibleToStudent(assignment, student)) {
       return { locked: true, hideGrade: true, tooltip: TOOLTIP_KEYS.NONE };
     } else if (hasGradingPeriods) {
       return cellMappingsForMultipleGradingPeriods(assignment, student, selectedGradingPeriodID, isAdmin);

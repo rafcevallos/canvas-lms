@@ -349,8 +349,8 @@ class CalendarEventsApiController < ApplicationController
       mark_submitted_assignments(user, events)
       includes = Array(params[:include])
       if includes.include?("submission")
-        submissions = Submission.active.where(assignment_id: events, user_id: user)
-          .group_by(&:assignment_id)
+        submissions = Submission.active.where(assignment_id: events, user_id: user).
+          group_by(&:assignment_id)
       end
       # preload data used by assignment_json
       ActiveRecord::Associations::Preloader.new.preload(events, :discussion_topic)
@@ -372,6 +372,11 @@ class CalendarEventsApiController < ApplicationController
     end
 
     if @errors.empty?
+      calendar_events, assignments = events.partition { |e| e.is_a?(CalendarEvent) }
+      ActiveRecord::Associations::Preloader.new.preload(calendar_events, [:context, :parent_event])
+      ActiveRecord::Associations::Preloader.new.preload(assignments, Api::V1::Assignment::PRELOADS)
+      ActiveRecord::Associations::Preloader.new.preload(assignments.map(&:context), [:account, :grading_period_groups, :enrollment_term])
+
       json = events.map do |event|
         subs = submissions[event.id] if submissions
         sub = subs.sort_by(&:submitted_at).last if subs
@@ -406,6 +411,8 @@ class CalendarEventsApiController < ApplicationController
   #   Time zone of the user editing the event. Allowed time zones are
   #   {http://www.iana.org/time-zones IANA time zones} or friendlier
   #   {http://api.rubyonrails.org/classes/ActiveSupport/TimeZone.html Ruby on Rails time zones}.
+  # @argument calendar_event[all_day] [Boolean]
+  #   When true event is considered to span the whole day and times are ignored.
   # @argument calendar_event[child_event_data][X][start_at] [DateTime]
   #   Section-level start time(s) if this is a course event. X can be any
   #   identifier, provided that it is consistent across the start_at, end_at
@@ -575,6 +582,8 @@ class CalendarEventsApiController < ApplicationController
   #   Time zone of the user editing the event. Allowed time zones are
   #   {http://www.iana.org/time-zones IANA time zones} or friendlier
   #   {http://api.rubyonrails.org/classes/ActiveSupport/TimeZone.html Ruby on Rails time zones}.
+  # @argument calendar_event[all_day] [Boolean]
+  #   When true event is considered to span the whole day and times are ignored.
   # @argument calendar_event[child_event_data][X][start_at] [DateTime]
   #   Section-level start time(s) if this is a course event. X can be any
   #   identifier, provided that it is consistent across the start_at, end_at
@@ -647,7 +656,7 @@ class CalendarEventsApiController < ApplicationController
       @event.cancel_reason = params[:cancel_reason]
       if @event.destroy
         if @event.appointment_group && @event.appointment_group.appointments.count == 0 && @event.appointment_group.context.root_account.feature_enabled?(:better_scheduler)
-          @event.appointment_group.destroy
+          @event.appointment_group.destroy(@current_user)
         end
         render :json => event_json(@event, @current_user, session)
       else
@@ -659,6 +668,7 @@ class CalendarEventsApiController < ApplicationController
   def public_feed
     return unless get_feed_context
     @events = []
+    appointments = []
 
     if @current_user
       # if the feed url included the information on the requesting user,
@@ -676,11 +686,35 @@ class CalendarEventsApiController < ApplicationController
 
         # Add in any appointment groups this user can manage and someone has reserved
         appointment_codes = manageable_appointment_groups(@current_user).map(&:asset_string)
-        @events.concat CalendarEvent.active.
+        appointment_groups = CalendarEvent.active.
                          for_user_and_context_codes(@current_user, appointment_codes).
                          send(*date_scope_and_args).
                          events_with_child_events.
                          to_a
+
+        student_events = appointment_groups.map(&:child_events).flatten
+
+        student_events.each do |appointment|
+          # find the context associated with the appointment..
+          event_context = @contexts.find do |context|
+            effective_context_code =
+              if context.is_a?(Course)
+                "course_" + context.id.to_s
+              elsif context.is_a?(Group)
+                "group_" + context.id.to_s
+              end
+            !effective_context_code.nil? && appointment.effective_context_code.eql?(effective_context_code)
+          end
+
+          # and then find the user in that context who is associated with the event
+          next if event_context.nil?
+          appointment_user = event_context.users.find { |user| user.id == appointment.user_id }
+          unless appointment_user.nil?
+            appointments.push({user: appointment_user.name, comments: appointment.comments,
+                               parent_id: appointment.parent_calendar_event_id, course_name: event_context.name})
+          end
+        end
+        @events.concat appointment_groups
       end
     else
       # if the feed url doesn't give us the requesting user,
@@ -726,7 +760,12 @@ class CalendarEventsApiController < ApplicationController
         # scan the descriptions for attachments
         preloaded_attachments = api_bulk_load_user_content_attachments(@events.map(&:description))
         @events.each do |event|
-          ics_event = event.to_ics(in_own_calendar: false, preloaded_attachments: preloaded_attachments, user: @current_user)
+          ics_event =
+            if event.is_a?(CalendarEvent)
+              event.to_ics(in_own_calendar: false, preloaded_attachments: preloaded_attachments, user: @current_user, user_events: appointments)
+            else
+              event.to_ics(in_own_calendar: false, preloaded_attachments: preloaded_attachments, user: @current_user)
+            end
           calendar.add_event(ics_event) if ics_event
         end
 
@@ -785,7 +824,6 @@ class CalendarEventsApiController < ApplicationController
   end
 
   # @API Set a course timetable
-  # @beta
   #
   # Creates and updates "timetable" events for a course.
   # Can automaticaly generate a series of calendar events based on simple schedules
@@ -865,7 +903,6 @@ class CalendarEventsApiController < ApplicationController
   end
 
   # @API Get course timetable
-  # @beta
   #
   # Returns the last timetable set by the
   # {api:CalendarEventsApiController#set_course_timetable Set a course timetable} endpoint
@@ -879,7 +916,6 @@ class CalendarEventsApiController < ApplicationController
   end
 
   # @API Create or update events directly for a course timetable
-  # @beta
   #
   # Creates and updates "timetable" events for a course or course section.
   # Similar to {api:CalendarEventsApiController#set_course_timetable setting a course timetable},
@@ -1057,6 +1093,7 @@ class CalendarEventsApiController < ApplicationController
 
       scope = scope.active.order(:due_at, :id)
       scope = scope.send(*date_scope_and_args(:due_between_with_overrides)) unless @all_events
+
       last_scope = scope
       collections << [Shard.current.id, BookmarkedCollection.wrap(bookmarker, scope)]
     end
@@ -1111,7 +1148,7 @@ class CalendarEventsApiController < ApplicationController
       }
 
     # in courses with diff assignments on, only show the visible assignments
-    scope = scope.filter_by_visibilities_in_given_courses(student_ids, courses_to_filter_assignments.map(&:id))
+    scope = scope.filter_by_visibilities_in_given_courses(student_ids, courses_to_filter_assignments.map(&:id)).group('assignments.id')
     scope
   end
 
@@ -1300,6 +1337,10 @@ class CalendarEventsApiController < ApplicationController
     ag_count = (params[:context_codes] || []).count { |code| code =~ /\Aappointment_group_/ }
     context_limit = @domain_root_account.settings[:calendar_contexts_limit] || 10
     codes = (params[:context_codes] || [user.asset_string])[0, context_limit + ag_count]
+    # also accept a more compact comma-separated list of appointment group ids
+    if params[:appointment_group_ids].present? && params[:appointment_group_ids].is_a?(String)
+      codes += params[:appointment_group_ids].split(',').map { |id| "appointment_group_#{id}" }
+    end
     get_options(codes, user)
 
     # if specific context codes were requested, ensure the user can access them

@@ -17,7 +17,7 @@
  */
 
 define([
-  '../../../../coffeescripts/react_files/mockFilesENV.coffee',
+  '../../../../coffeescripts/react_files/mockFilesENV',
   'react',
   'react-dom',
   'react-addons-test-utils',
@@ -93,7 +93,7 @@ define([
     sinon.stub(window, 'confirm').returns(true);
     Simulate.click(ReactDOM.findDOMNode(itemCog.refs.deleteLink));
     ok(window.confirm.calledOnce, 'confirms before deleting');
-    ok(ajaxSpy.calledWithMatch({url: '/api/v1/folders/999', type: 'DELETE', data: {force: 'true'}}), 'sends DELETE to right url');
+    ok(ajaxSpy.calledWithMatch({url: '/api/v1/folders/999', data: {force: 'true'}}), 'sends DELETE to right url');
     $.ajax.restore();
     window.confirm.restore();
   });

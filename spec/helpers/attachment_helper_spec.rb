@@ -44,4 +44,27 @@ describe AttachmentHelper do
     expect(attrs).to match /#{@current_user.id}/
     expect(attrs).to match /#{@att.id}/
   end
+
+  it "includes anonymous_instructor_annotations in canvadoc url" do
+    @current_user = @teacher
+    allow(@att).to receive(:canvadocable?).and_return(true)
+    attrs = doc_preview_attributes(@att, { anonymous_instructor_annotations: true })
+    expect(attrs).to match "anonymous_instructor_annotations%22:true"
+  end
+
+  it "includes enrollment_type in canvadoc url when annotations are enabled" do
+    @current_user = @teacher
+    allow(@att).to receive(:canvadocable?).and_return(true)
+    attrs = doc_preview_attributes(@att, { enable_annotations: true, enrollment_type: "teacher" })
+    expect(attrs).to match "enrollment_type%22:%22teacher"
+  end
+
+  describe "set_cache_header" do
+    it "should not allow caching of instfs redirects" do
+      allow(@att).to receive(:instfs_hosted?).and_return(true)
+      expect(self).to receive(:cancel_cache_buster).never
+      set_cache_header(@att, false)
+      expect(response.headers).not_to have_key('Cache-Control')
+    end
+  end
 end

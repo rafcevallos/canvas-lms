@@ -15,12 +15,22 @@
 # You should have received a copy of the GNU Affero General Public License along
 # with this program. If not, see <http://www.gnu.org/licenses/>.
 
-require_relative '../config/boot'
+# Put this in config/application.rb
+require File.expand_path('../boot', __FILE__)
+
 require_relative '../lib/canvas_yaml'
 
+# Yes, it doesn't seem DRY to list these both in the if and else
+# but this used to be "require 'rails/all'" which included sprockets.
+# I needed to explicitly opt-out of sprockets but since I'm not sure
+# about the other frameworks, I left this so it would be exactly the same
+# as "require 'rails/all'" but without sprockets--even though it is a little
+# different then the rails 3 else block. If the difference is not intended,
+# they can be pulled out of the if/else
 require "active_record/railtie"
 require "action_controller/railtie"
 require "action_mailer/railtie"
+# require "sprockets/railtie" # Do not enable the Rails Asset Pipeline
 require "rails/test_unit/railtie"
 
 Bundler.require(*Rails.groups)
@@ -32,6 +42,7 @@ module CanvasRails
     require 'logging_filter'
     config.filter_parameters.concat LoggingFilter.filtered_parameters
     config.action_dispatch.rescue_responses['AuthenticationMethods::AccessTokenError'] = 401
+    config.action_dispatch.rescue_responses['AuthenticationMethods::AccessTokenScopeError'] = 401
     config.action_dispatch.rescue_responses['AuthenticationMethods::LoggedOutError'] = 401
     config.action_dispatch.default_headers['X-UA-Compatible'] = "IE=Edge,chrome=1"
     config.action_dispatch.default_headers.delete('X-Frame-Options')
@@ -88,6 +99,7 @@ module CanvasRails
 
     # Activate observers that should always be running
     config.active_record.observers = [:cacher, :stream_item_cache, :live_events_observer, :conditional_release_observer ]
+    config.active_record.allow_unsafe_raw_sql = :disabled unless CANVAS_RAILS5_1
 
     config.active_support.encode_big_decimal_as_string = false
 
@@ -131,7 +143,7 @@ module CanvasRails
             connection_parameters[:host] = host
             @connection = PG::Connection.connect(connection_parameters)
 
-            raise "Canvas requires PostgreSQL 9.3 or newer" unless postgresql_version >= 90300
+            raise "Canvas requires PostgreSQL 9.5 or newer" unless postgresql_version >= 90500
 
             configure_connection
 
@@ -148,8 +160,32 @@ module CanvasRails
       end
     end
 
+    module TypeMapInitializerExtensions
+      if CANVAS_RAILS5_1
+        def query_conditions_for_initial_load(type_map)
+          known_type_names = type_map.keys.map { |n| "'#{n}'" } + type_map.keys.map { |n| "'_#{n}'" }
+          <<-SQL % [known_type_names.join(", "),]
+            WHERE
+              t.typname IN (%s)
+          SQL
+        end
+      else
+        def query_conditions_for_initial_load
+          known_type_names = @store.keys.map { |n| "'#{n}'" } + @store.keys.map { |n| "'_#{n}'" }
+          <<-SQL % [known_type_names.join(", "),]
+            WHERE
+              t.typname IN (%s)
+          SQL
+        end
+      end
+    end
+
     Autoextend.hook(:"ActiveRecord::ConnectionAdapters::PostgreSQLAdapter",
                     PostgreSQLEarlyExtensions,
+                    method: :prepend)
+
+    Autoextend.hook(:"ActiveRecord::ConnectionAdapters::PostgreSQL::OID::TypeMapInitializer",
+                    TypeMapInitializerExtensions,
                     method: :prepend)
 
     SafeYAML.singleton_class.send(:attr_accessor, :safe_parsing)
@@ -238,22 +274,7 @@ module CanvasRails
       end
     end
 
-    if Rails.env.development? && ENV['BETTER_ERRORS_DISABLE'] != 'true'
-      require 'better_errors'
-      if ENV['BETTER_ERRORS_ENABLE_CONSOLE'] == 'true'
-        # better_errors automatically loads binding_of_caller if it is available
-        puts <<-EOM.strip_heredoc
-          *************************************************************************
-          * WARNING: better_errors console enabled! Please use caution when using *
-          * localhost tunnels such as ssh, ngrok or localtunnel while using the   *
-          * better_errors live REPL console. The use of such tunnels in this      *
-          * configuration make your system vulnerable to remote code execution.   *
-          *************************************************************************
-        EOM
-      end
-    else
-      config.exceptions_app = ExceptionsApp.new
-    end
+    config.exceptions_app = ExceptionsApp.new
 
     config.before_initialize do
       config.action_controller.asset_host = Canvas::Cdn.method(:asset_host_for)

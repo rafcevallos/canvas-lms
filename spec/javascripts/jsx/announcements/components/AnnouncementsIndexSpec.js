@@ -22,10 +22,12 @@ import { Provider } from 'react-redux'
 import _ from 'lodash'
 
 import AnnouncementsIndex from 'jsx/announcements/components/AnnouncementsIndex'
+import sampleData from '../sampleData'
 
 const makeProps = (props = {}) => _.merge({
   announcements: [],
   announcementsPage: 1,
+  isCourseContext: true,
   isLoadingAnnouncements: false,
   hasLoadedAnnouncements: false,
   announcementsLastPage: 5,
@@ -34,19 +36,24 @@ const makeProps = (props = {}) => _.merge({
     manage_content: true,
     moderate: true,
   },
-  getAnnouncements: () => {},
+  getAnnouncements () {},
+  setAnnouncementSelection () {},
+  deleteAnnouncements () {},
+  toggleAnnouncementsLock () {},
 }, props)
 
 // necessary to mock this because we have a child Container/"Smart" component
 // that need to pull their props from the store state
 const store = {
   getState: () => ({
-    courseId: '5',
+    contextType: 'course',
+    contextId: '1',
     permissions: {
       create: true,
       manage_content: true,
       moderate: true,
     },
+    selectedAnnouncements: [],
   }),
   // we only need to define these functions so that we match the react-redux contextTypes
   // shape for a store otherwise react-redux thinks our store is invalid
@@ -82,7 +89,7 @@ test('calls getAnnouncements if hasLoadedAnnouncements is false', () => {
   equal(getAnnouncements.callCount, 1)
 })
 
-test('renders IndexHeader if we have manage_content permissions', () => {
+test('should render IndexHeader if we have manage_content permissions', () => {
   const tree = mount(
     <Provider store={store}>
       <AnnouncementsIndex {...makeProps({ permissions: { manage_content: true } })} />
@@ -92,12 +99,96 @@ test('renders IndexHeader if we have manage_content permissions', () => {
   ok(node.exists())
 })
 
-test('does not render IndexHeader if we do not have manage_content permissions', () => {
+test('should render IndexHeader even if we do not have manage_content permissions', () => {
   const tree = mount(
     <Provider store={store}>
       <AnnouncementsIndex {...makeProps({ permissions: { manage_content: false } })} />
     </Provider>
   )
   const node = tree.find('IndexHeader')
-  notOk(node.exists())
+  ok(node.exists())
+})
+
+test('clicking announcement checkbox triggers setAnnouncementSelection with correct data', (assert) => {
+  const done = assert.async()
+  const selectSpy = sinon.spy()
+  const props = {
+    announcements: sampleData.announcements,
+    announcementSelectionChangeStart: selectSpy,
+    hasLoadedAnnouncements: true,
+    permissions: {
+      moderate: true,
+    },
+  }
+  const tree = mount(
+    <Provider store={store}>
+      <AnnouncementsIndex {...makeProps(props)} />
+    </Provider>
+  )
+
+  tree.find('input[type="checkbox"]').simulate('change', { target: { checked: true } })
+  setTimeout(() => {
+    equal(selectSpy.callCount, 1)
+    deepEqual(selectSpy.firstCall.args, [{ selected: true, id: sampleData.announcements[0].id }])
+    done()
+  })
+})
+
+test('onManageAnnouncement shows delete modal when called with delete action', (assert) => {
+  const done = assert.async()
+  const props = {
+    announcements: sampleData.announcements,
+    hasLoadedAnnouncements: true,
+    permissions: {
+      moderate: true,
+    },
+  }
+
+  function indexRef (c) {
+    if (c) {
+      c.onManageAnnouncement(null, { action: 'delete' })
+
+      setTimeout(() => {
+        ok(c.deleteModal)
+        c.deleteModal.hide()
+        done()
+      })
+    }
+  }
+
+  mount(
+    <Provider store={store}>
+      <AnnouncementsIndex {...makeProps(props)} ref={indexRef} />
+    </Provider>
+  )
+})
+
+test('onManageAnnouncement calls toggleAnnouncementsLock when called with lock action', (assert) => {
+  const done = assert.async()
+  const lockSpy = sinon.spy()
+  const props = {
+    announcements: sampleData.announcements,
+    hasLoadedAnnouncements: true,
+    permissions: {
+      moderate: true,
+    },
+    toggleAnnouncementsLock: lockSpy,
+  }
+
+  function indexRef (c) {
+    if (c) {
+      c.onManageAnnouncement(null, { action: 'lock' })
+
+      setTimeout(() => {
+        equal(lockSpy.callCount, 1)
+        done()
+      })
+    }
+  }
+
+  mount(
+    <Provider store={store}>
+      <AnnouncementsIndex {...makeProps(props)} ref={indexRef} />
+    </Provider>
+  )
 })

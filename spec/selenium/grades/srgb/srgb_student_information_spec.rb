@@ -21,7 +21,7 @@ require_relative '../pages/gradebook_page'
 
 describe 'Screenreader Gradebook Student Information' do
   include_context 'in-process server selenium tests'
-  include_context 'reusable_course'
+  include_context 'reusable_gradebook_course'
   include GradebookCommon
 
   let(:srgb_page) { SRGB }
@@ -55,8 +55,7 @@ describe 'Screenreader Gradebook Student Information' do
       expect(srgb_page.final_grade.text).to eq("30% (3 / 10 points)")
       expect(srgb_page.assign_subtotal_grade.text).to eq("30% (3 / 10)")
       expect_new_page_load { srgb_page.switch_to_default_gradebook_link.click }
-      gradebook_page = Gradebook::MultipleGradingPeriods.new
-      expect(gradebook_page.cell_graded?("30%", 4, 0)).to be true
+      expect(Gradebook::MultipleGradingPeriods.cell_graded?("30%", 4, 0)).to be true
     end
 
     context 'displays no points possible warning' do

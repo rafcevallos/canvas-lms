@@ -45,9 +45,7 @@ describe "student groups" do
 
       f('#edit_group').click
       set_value f('#group_name'), "new group name"
-      f('#ui-id-2').find_element(:css, 'button[type=submit]').click
-      wait_for_ajaximations
-
+      expect_new_page_load {f('#ui-id-2').find_element(:css, 'button[type=submit]').click}
       expect(g1.reload.name).to include("new group name")
     end
 
@@ -70,7 +68,7 @@ describe "student groups" do
 
     describe "new student group" do
       before(:each) do
-        seed_students(5)
+        seed_students(2)
         get "/courses/#{@course.id}/groups"
         f(".icon-plus").click
         wait_for_ajaximations
@@ -83,15 +81,13 @@ describe "student groups" do
       end
 
       it "should show students in the course", priority: "1", test_id: 180675 do
-        expected_student_list = ["Test Student 1", "Test Student 2", "Test Student 3",
-                                 "Test Student 4", "Test Student 5"]
+        expected_student_list = ["Test Student 1", "Test Student 2"]
         student_list = ff(".checkbox")
         expect(student_list).to have_size(expected_student_list.size) # there should be no teachers in the list
 
         # check the list of students for expected names
-        student_list.each_with_index do |student, index|
-          expect(student).to include_text(expected_student_list[index].to_s)
-        end
+        expect(student_list[0].text).to eq "Test Student 1"
+        expect(student_list[1].text).to eq "Test Student 2"
       end
 
       it "should be titled what the user types in", priority: "1", test_id: 180676 do

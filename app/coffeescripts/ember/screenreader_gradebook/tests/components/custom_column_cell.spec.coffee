@@ -41,6 +41,8 @@ define [
         @column = Ember.Object.create
           id: '22'
           title: 'Notes'
+          read_only: false
+          is_loading: false
         @student = Ember.Object.create
           id: '45'
         @dataForStudent = [
@@ -69,9 +71,24 @@ define [
   test "saveUrl", ->
     equal @component.get('saveURL'), '/api/v1/custom_gradebook_columns/22/45'
 
+  test "disabled is true when column isLoading", ->
+    @component.column.set('isLoading', true)
+    @component.column.set('read_only', false)
+    equal @component.get('disabled'), true
+
+  test "disabled is true when column is read_only", ->
+    @component.column.set('isLoading', false)
+    @component.column.set('read_only', true)
+    equal @component.get('disabled'), true
+
+  test "disabled is false when column is not loading and not read_only", ->
+    @component.column.set('isLoading', false)
+    @component.column.set('read_only', false)
+    equal @component.get('disabled'), false
+
   test "focusOut", (assert) ->
     assert.expect(1)
-    stub = @stub @component, 'boundSaveSuccess'
+    stub = sandbox.stub @component, 'boundSaveSuccess'
 
     requestStub = null
     run =>
@@ -81,7 +98,7 @@ define [
         content: 'less content now'
       )
 
-    @stub(@component, 'ajax').returns requestStub
+    sandbox.stub(@component, 'ajax').returns requestStub
 
     run =>
       @component.set('value', 'such success')
@@ -92,14 +109,14 @@ define [
   test "textAreaInput does not flash an error if note length is exactly the max allowed length", ->
     note = 'a'.repeat(GradebookConstants.MAX_NOTE_LENGTH)
     noteInputEvent = {target: {value: note}}
-    maxLengthError = @spy(GradebookHelpers, 'flashMaxLengthError')
+    maxLengthError = sandbox.spy(GradebookHelpers, 'flashMaxLengthError')
     @component.textAreaInput(noteInputEvent)
     ok maxLengthError.notCalled
 
   test "textAreaInput flashes an error if note length is greater than the max allowed length", ->
     note = 'a'.repeat(GradebookConstants.MAX_NOTE_LENGTH + 1)
     noteInputEvent = {target: {value: note}}
-    maxLengthError = @spy(GradebookHelpers, 'flashMaxLengthError')
+    maxLengthError = sandbox.spy(GradebookHelpers, 'flashMaxLengthError')
     @component.textAreaInput(noteInputEvent)
     ok maxLengthError.calledOnce
 
@@ -107,8 +124,8 @@ define [
   even if note length is greater than the max allowed length", ->
     note = 'a'.repeat(GradebookConstants.MAX_NOTE_LENGTH + 1)
     noteInputEvent = {target: {value: note}}
-    maxLengthError = @spy(GradebookHelpers, 'flashMaxLengthError')
-    findStub = @stub($, 'find')
+    maxLengthError = sandbox.spy(GradebookHelpers, 'flashMaxLengthError')
+    findStub = sandbox.stub($, 'find')
     findStub.withArgs('.ic-flash-error').returns(['a non-empty error array'])
     @component.textAreaInput(noteInputEvent)
     ok maxLengthError.notCalled

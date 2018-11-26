@@ -27,7 +27,7 @@ class Canvadoc < ActiveRecord::Base
   def upload(opts = {})
     return if document_id.present?
 
-    url = attachment.authenticated_url(expires_in: 7.days)
+    url = attachment.public_url(expires_in: 7.days)
 
     opts.delete(:annotatable) unless Canvadocs.annotations_supported?
 
@@ -58,11 +58,20 @@ class Canvadoc < ActiveRecord::Base
   end
 
   def has_annotations?
-    account_context = attachment.context.try(:account)
-    account_context ||= attachment.context.try(:root_account)
-    new_annotations_enabled = account_context&.feature_enabled?(:new_annotations)
-    new_annotations_enabled || has_annotations == true
+    Canvadocs.annotations_supported? || has_annotations == true
   end
+
+  # NOTE: the Setting.get('canvadoc_mime_types', ...) and the
+  # Setting.get('canvadoc_submission_mime_types', ...) will
+  # pull from the database first. the second parameter is there
+  # as a default in case the settings are not located in the
+  # db. this means that for instructure production canvas, 
+  # we need to update the beta and prod databases with any 
+  # mime_types we want to add/remove.
+  # TODO: find out if opensource users need the second param
+  # to the Setting.get(...,...) calls and if not, then remove
+  # them entirely from the codebase (since intructure prod
+  # does not need them)
 
   def self.mime_types
     JSON.parse Setting.get('canvadoc_mime_types', %w[
@@ -74,6 +83,25 @@ class Canvadoc < ActiveRecord::Base
       application/vnd.openxmlformats-officedocument.spreadsheetml.sheet
       application/vnd.openxmlformats-officedocument.presentationml.presentation
       application/vnd.openxmlformats-officedocument.wordprocessingml.document
+    ].to_json)
+  end
+
+  def self.submission_mime_types
+    JSON.parse Setting.get('canvadoc_submission_mime_types', %w[
+      application/excel
+      application/msword
+      application/pdf
+      application/vnd.ms-excel
+      application/vnd.ms-powerpoint
+      application/vnd.openxmlformats-officedocument.spreadsheetml.sheet
+      application/vnd.openxmlformats-officedocument.presentationml.presentation
+      application/vnd.openxmlformats-officedocument.wordprocessingml.document
+      image/bmp
+      image/jpeg
+      image/jpg
+      image/png
+      image/tif
+      image/tiff
     ].to_json)
   end
 

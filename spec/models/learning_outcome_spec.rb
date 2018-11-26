@@ -526,6 +526,11 @@ describe LearningOutcome do
       }.from(1).to(0)
     end
 
+    it "returns points possible value set through rubric_criterion assessor" do
+      @outcome.rubric_criterion[:points_possible] = 10
+      expect(@outcome.rubric_criterion[:points_possible]).to eq 10
+    end
+
     it "returns #data[:rubric_criterion] when #rubric_criterion is called" do
       @outcome.rubric_criterion = {
         description: "Thoughtful description",
@@ -806,6 +811,16 @@ describe LearningOutcome do
     end
 
     context "default values" do
+      it 'should default mastery points to 3' do
+        @outcome = LearningOutcome.create!(:title => 'outcome')
+        expect(@outcome.mastery_points).to be 3
+      end
+
+      it 'should default points possible to 5' do
+        @outcome = LearningOutcome.create!(:title => 'outcome')
+        expect(@outcome.points_possible).to be 5
+      end
+
       it "should default calculation_method to highest" do
         @outcome = LearningOutcome.create!(:title => 'outcome')
         expect(@outcome.calculation_method).to eql('highest')
@@ -965,6 +980,24 @@ describe LearningOutcome do
       end
     end
 
+    describe '#ensure_presence_in_context' do
+      it 'adds active outcomes to a context if they are not present' do
+        account = Account.default
+        course_factory
+        3.times do |i|
+          LearningOutcome.create!(
+            context: account,
+            title: "outcome_#{i}",
+            calculation_method: 'highest',
+            workflow_state: i == 0 ? 'deleted' : 'active'
+          )
+        end
+        outcome_ids = account.created_learning_outcomes.pluck(:id)
+        LearningOutcome.ensure_presence_in_context(outcome_ids, @course)
+        expect(@course.linked_learning_outcomes.count).to eq(2)
+      end
+    end
+
     describe '#align' do
       let(:assignment) { assignment_model }
 
@@ -1038,6 +1071,138 @@ describe LearningOutcome do
       expect(@outcome.migration_id).to eql "GUID-YYYY"
       allow(AcademicBenchmark).to receive(:use_new_guid_columns?).and_return(false)
       expect(@outcome.migration_id).to eql "GUID-XXXX"
+    end
+  end
+
+  context 'propagate changes to aligned rubrics' do
+    before :once do
+      course_with_teacher(:active_course => true, :active_user => true)
+    end
+
+    it 'does not propagate on a new record' do
+      lo = LearningOutcome.new
+      lo.short_description = 'beta'
+      expect(ContentTag).not_to receive(:learning_outcome_alignments)
+      lo.save!
+    end
+
+    it 'does not propagate on assessed rubric' do
+      assignment_model
+      course_with_student_logged_in(:active_all => true)
+      outcome_with_rubric mastery_points: 4.0
+      @association = @rubric.associate_with(@assignment, @course, :purpose => 'grading', :use_for_grading => true)
+      @assessment = @association.assess({
+        :user => @student,
+        :assessor => @teacher,
+        :artifact => @assignment.find_or_create_submission(@student),
+        :assessment => {
+          :assessment_type => 'grading',
+          :criterion_crit1 => {
+            :points => 5
+          }
+        }
+      })
+      @outcome.rubric_criterion = { mastery_points: 3.0 }
+      @outcome.save!
+      expect(@rubric.reload.criteria[0][:mastery_points]).to be 4.0
+    end
+
+    it 'propagates on data change' do
+      outcome_with_rubric mastery_points: 4.0
+      @outcome.rubric_criterion = { mastery_points: 3.0 }
+      @outcome.save!
+      expect(@rubric.reload.criteria[0][:mastery_points]).to be 3.0
+    end
+
+    it 'propagates on short description change' do
+      outcome_with_rubric
+      @outcome.short_description = 'beta'
+      @outcome.save!
+      expect(@rubric.reload.criteria[0][:description]).to eql 'beta'
+    end
+
+    it 'propagates on description change' do
+      outcome_with_rubric
+      @outcome.description = 'beta'
+      @outcome.save!
+      expect(@rubric.reload.criteria[0][:long_description]).to eql 'beta'
+    end
+  end
+
+  context 'updateable rubrics' do
+    before :once do
+      course_with_teacher(:active_course => true, :active_user => true)
+    end
+
+    it 'returns unassessed rubric' do
+      outcome_with_rubric
+      expect(@outcome.updateable_rubrics.length).to eq 1
+    end
+
+    context 'one assessed assignment' do
+      before do
+        course_with_student_logged_in(:active_all => true)
+        outcome_with_rubric
+        a1 = assignment_model
+        association = @rubric.associate_with(a1, @course, :purpose => 'grading', :use_for_grading => true)
+        association.assess({
+          :user => @student,
+          :assessor => @teacher,
+          :artifact => a1.find_or_create_submission(@student),
+          :assessment => {
+            :assessment_type => 'grading',
+            :criterion_crit1 => {
+              :points => 5
+            }
+          }
+        })
+      end
+
+      it 'does not return assessed rubric' do
+        expect(@outcome.updateable_rubrics.length).to eq 0
+      end
+
+      context 'plus one unassessed assignment' do
+        before do
+          a2 = assignment_model
+          @rubric.associate_with(a2, @course, :purpose => 'grading', :use_for_grading => true)
+        end
+
+        it 'does not return assessed rubric' do
+          expect(@outcome.updateable_rubrics.length).to eq 0
+        end
+      end
+    end
+
+    it 'does return course rubric referenced by single assignment' do
+      outcome_with_rubric
+      a1 = assignment_model
+      a1.create_rubric_association(:rubric => @rubric,
+                                   :purpose => 'grading',
+                                   :use_for_grading => true,
+                                   :context => @course)
+      RubricAssociation.create!(
+        :rubric => @rubric,
+        :association_object => @course,
+        :context => @course,
+        :purpose => 'bookmark'
+      )
+      expect(@outcome.updateable_rubrics.length).to eq 1
+    end
+
+    it 'does not return rubric referenced by multiple assignments' do
+      outcome_with_rubric
+      a1 = assignment_model
+      a2 = assignment_model
+      a1.create_rubric_association(:rubric => @rubric,
+                                   :purpose => 'grading',
+                                   :use_for_grading => true,
+                                   :context => @course)
+      a2.create_rubric_association(:rubric => @rubric,
+                                   :purpose => 'grading',
+                                   :use_for_grading => true,
+                                   :context => @course)
+      expect(@outcome.updateable_rubrics.length).to eq 0
     end
   end
 end

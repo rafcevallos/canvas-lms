@@ -296,6 +296,23 @@ describe ContentTag do
     expect(@assignment.title).to eq 'some assignment (renamed)'
   end
 
+  it "should associate the tag with an external tool matching the url" do
+    course_factory
+    url = 'http://quiz-lti.docker/lti/launch'
+    tool = @course.context_external_tools.create!({
+      name: 'tool',
+      consumer_key: 'key',
+      shared_secret: 'secret',
+      url: url
+    })
+    assignment = @course.assignments.create!(
+      title: 'some assignment',
+      submission_types: 'external_tool',
+      external_tool_tag_attributes: { url: url }
+    )
+    expect(assignment.external_tool_tag.content).to eq(tool)
+  end
+
   describe ".update_for" do
     context "when updating a quiz" do
       before do
@@ -327,6 +344,37 @@ describe ContentTag do
         @tag.reload
         expect(@tag.workflow_state).to eq "active"
       end
+    end
+  end
+
+  # I really want to change this to "duplicable?" but we're already returning "is_duplicate_able" in API json ಠ益ಠ
+  describe "duplicate_able?" do
+    before :once do
+      course_factory
+      @module = @course.context_modules.create!(:name => "module")
+    end
+
+    it "returns true for discussion_topic tags" do
+      topic = @course.discussion_topics.create! :title => "topic"
+      topic_tag = @module.add_item({:type => 'DiscussionTopic', :id => topic.id})
+      expect(topic_tag).to be_duplicate_able
+    end
+
+    it "returns true for wiki_page tags" do
+      page = @course.wiki_pages.create! :title => "page"
+      page_tag = @module.add_item({:type => 'WikiPage', :id => page.id})
+      expect(page_tag).to be_duplicate_able
+    end
+
+    it "defers to Assignment#can_duplicate? for assignment tags" do
+      assignment1 = @course.assignments.create! :title => "assignment1"
+      assignment2 = @course.assignments.create! :title => "assignment2"
+      allow_any_instantiation_of(assignment1).to receive(:can_duplicate?).and_return(true)
+      allow_any_instantiation_of(assignment2).to receive(:can_duplicate?).and_return(false)
+      assignment1_tag = @module.add_item({:type => 'Assignment', :id => assignment1.id})
+      assignment2_tag = @module.add_item({:type => 'Assignment', :id => assignment2.id})
+      expect(assignment1_tag).to be_duplicate_able
+      expect(assignment2_tag).not_to be_duplicate_able
     end
   end
 
@@ -499,24 +547,6 @@ describe ContentTag do
     @tag.save
 
     expect(@module.reload.updated_at.to_i).to eq yesterday.to_i
-  end
-
-  describe '.content_type' do
-    it 'returns the correct representation of a quiz' do
-      content_tag = ContentTag.create! content: quiz_model, context: course_model
-      expect(content_tag.content_type).to eq 'Quizzes::Quiz'
-
-      content_tag.content_type = 'Quiz'
-      content_tag.send(:save_without_callbacks)
-
-      expect(ContentTag.find(content_tag.id).content_type).to eq 'Quizzes::Quiz'
-    end
-
-    it 'returns the content type attribute if not a quiz' do
-      content_tag = ContentTag.create! content: assignment_model, context: course_model
-
-      expect(content_tag.content_type).to eq 'Assignment'
-    end
   end
 
   describe "visible_to_students_in_course_with_da" do

@@ -16,12 +16,11 @@
 # with this program. If not, see <http://www.gnu.org/licenses/>.
 
 define [
-  'i18n!assignments'
   'Backbone'
   'jst/assignments/DateDueColumnView'
   'jquery'
   '../../behaviors/tooltip'
-], (I18n, Backbone, template, $) ->
+], (Backbone, template, $) ->
 
   class DateDueColumnView extends Backbone.View
     template: template
@@ -35,9 +34,13 @@ define [
         tooltipClass: 'center bottom vertical',
         content: -> $($(@).data('tooltipSelector')).html()
 
+    # has to handle both the discusson's model,
+    # and a graded discussion's child assignment model
     toJSON: ->
       data = @model.toView()
-      data.selector  = @model.get("id") + "_due"
-      data.linkHref  = @model.htmlUrl()
-      data.allDates  = @model.allDates()
+      m = @model.get('assignment') || @model
+
+      data.selector  = m.get("id") + "_due"
+      data.linkHref  = m.htmlUrl()
+      data.allDates  = m.allDates()
       data

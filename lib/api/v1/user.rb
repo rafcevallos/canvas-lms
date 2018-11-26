@@ -47,7 +47,7 @@ module Api::V1::User
     excludes ||= []
     api_json(user, current_user, session, API_USER_JSON_OPTS).tap do |json|
       enrollment_json_opts = { current_grading_period_scores: includes.include?('current_grading_period_scores') }
-      if !excludes.include?('pseudonym') && user_json_is_admin?(context, current_user)
+      if includes.include?('sis_user_id') || (!excludes.include?('pseudonym') && user_json_is_admin?(context, current_user))
         include_root_account = @domain_root_account.trust_exists?
         sis_context = enrollment || @domain_root_account
         pseudonym = SisPseudonym.for(user, sis_context, type: :implicit, require_sis: false)
@@ -59,16 +59,15 @@ module Api::V1::User
         if user_can_read_sis_data?(current_user, context)
           json.merge! :sis_user_id => pseudonym&.sis_user_id,
                       :integration_id => pseudonym&.integration_id
-          # TODO: don't send sis_login_id; it's garbage data
-          if @domain_root_account.settings['return_sis_login_id'] == 'true'
-            json.merge! :sis_login_id => pseudonym&.unique_id
-          end
         end
-        json[:sis_import_id] = pseudonym&.sis_batch_id if @domain_root_account.grants_right?(current_user, session, :manage_sis)
-        json[:root_account] = HostUrl.context_host(pseudonym&.account) if include_root_account
 
-        if pseudonym
-          json[:login_id] = pseudonym.unique_id
+        if !excludes.include?('pseudonym') && user_json_is_admin?(context, current_user)
+          json[:sis_import_id] = pseudonym&.sis_batch_id if @domain_root_account.grants_right?(current_user, session, :manage_sis)
+          json[:root_account] = HostUrl.context_host(pseudonym&.account) if include_root_account
+
+          if pseudonym && context.grants_right?(current_user, session, :view_user_logins)
+            json[:login_id] = pseudonym.unique_id
+          end
         end
       end
 
@@ -82,7 +81,7 @@ module Api::V1::User
       end
       # include a permissions check here to only allow teachers and admins
       # to see user email addresses.
-      if includes.include?('email') && !excludes.include?('personal_info') && context.grants_right?(current_user, session, :read_roster)
+      if includes.include?('email') && !excludes.include?('personal_info') && context.grants_right?(current_user, session, :read_email_addresses)
         json[:email] = user.email
       end
 
@@ -186,6 +185,13 @@ module Api::V1::User
     hash
   end
 
+  def anonymous_user_display_json(anonymous_id)
+    {
+     anonymous_id: anonymous_id,
+     avatar_image_url: User.default_avatar_fallback
+    }
+  end
+
   # optimization hint, currently user only needs to pull pseudonyms from the db
   # if a site admin is making the request or they can manage_students
   def user_json_is_admin?(context = @context, current_user = @current_user)
@@ -218,7 +224,8 @@ module Api::V1::User
                               :created_at,
                               :start_at,
                               :end_at,
-                              :type]
+                              :type
+                            ]
 
   def enrollment_json(enrollment, user, session, includes = [], opts = {})
     api_json(enrollment, user, session, :only => API_ENROLLMENT_JSON_OPTS).tap do |json|
@@ -229,6 +236,7 @@ module Api::V1::User
       json[:role] = enrollment.role.name
       json[:role_id] = enrollment.role_id
       json[:last_activity_at] = enrollment.last_activity_at
+      json[:last_attended_at] = enrollment.last_attended_at
       json[:total_activity_time] = enrollment.total_activity_time
       if enrollment.root_account.grants_right?(user, session, :manage_sis)
         json[:sis_import_id] = enrollment.sis_batch_id

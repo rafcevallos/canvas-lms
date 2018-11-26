@@ -111,6 +111,11 @@
 #           "description": "whether this outcome has been used to assess a student",
 #           "example": true,
 #           "type": "boolean"
+#         },
+#         "has_updateable_rubrics": {
+#           "description": "whether updates to this outcome will propagate to unassessed rubrics that have imported it",
+#           "example": true,
+#           "type": "boolean"
 #         }
 #       }
 #     }
@@ -236,7 +241,7 @@ class OutcomesApiController < ApplicationController
   end
 
   def update_outcome_criterion(outcome)
-    criterion = outcome.data && outcome.data[:rubric_criterion]
+    criterion = outcome.rubric_criterion
     criterion ||= {}
     if params[:mastery_points]
       criterion[:mastery_points] = params[:mastery_points]

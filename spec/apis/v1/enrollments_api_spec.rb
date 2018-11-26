@@ -75,6 +75,7 @@ describe EnrollmentsApiController, type: :request do
           'updated_at'                         => new_enrollment.updated_at.xmlschema,
           'created_at'                         => new_enrollment.created_at.xmlschema,
           'last_activity_at'                   => nil,
+          'last_attended_at'                   => nil,
           'total_activity_time'                => 0,
           'sis_account_id'                     => @course.account.sis_source_id,
           'sis_course_id'                      => @course.sis_source_id,
@@ -93,6 +94,24 @@ describe EnrollmentsApiController, type: :request do
         expect(new_enrollment.course_id).to eql @course.id
         expect(new_enrollment.self_enrolled).to eq nil
         expect(new_enrollment).to be_an_instance_of StudentEnrollment
+      end
+
+      it "accepts sis_section_id" do
+        @section.update_attribute(:sis_source_id, 'sis_id')
+        json = api_call :post, @path, @path_options,
+                        {
+                          :enrollment => {
+                            :user_id                            => @unenrolled_user.id,
+                            :type                               => 'StudentEnrollment',
+                            :enrollment_state                   => 'active',
+                            :course_section_id                  => 'sis_section_id:sis_id',
+                            :limit_privileges_to_course_section => true,
+                            :start_at                           => nil,
+                            :end_at                             => nil
+                          }
+                        }
+        new_enrollment = Enrollment.find(json['id'])
+        expect(new_enrollment.course_section).to eq @section
       end
 
       it "should be unauthorized for users without manage_students permission" do
@@ -588,6 +607,7 @@ describe EnrollmentsApiController, type: :request do
           'updated_at'                         => new_enrollment.updated_at.xmlschema,
           'created_at'                         => new_enrollment.created_at.xmlschema,
           'last_activity_at'                   => nil,
+          'last_attended_at'                   => nil,
           'total_activity_time'                => 0,
           'sis_account_id'                     => @course.account.sis_source_id,
           'sis_course_id'                      => @course.sis_source_id,
@@ -705,6 +725,15 @@ describe EnrollmentsApiController, type: :request do
                         }
         expect(response.code).to eql '400'
       end
+
+      it "should not allow self-enrollment in a concluded course" do
+        @course.update_attributes(:start_at => 2.days.ago, :conclude_at => 1.day.ago,
+          :restrict_enrollments_to_course_dates => true)
+        json = raw_api_call :post, @path, @path_options,
+          {enrollment: {user_id: 'self', self_enrollment_code: @course.self_enrollment_code}}
+        expect(response.code).to eql '400'
+        expect(response.body).to include("concluded")
+      end
     end
   end
 
@@ -791,6 +820,16 @@ describe EnrollmentsApiController, type: :request do
           @user_params[:grading_period_id] = @first_grading_period.id
           raw_api_call(:get, @user_path, @user_params)
           expect(response).to be_ok
+        end
+
+        it "filters to terms for users" do
+          term = EnrollmentTerm.create!(name: 'fall', root_account_id: @course.root_account_id)
+          course = Course.create!(enrollment_term_id: term.id, root_account_id: @course.root_account_id, workflow_state: 'available')
+          e = course.enroll_user(@student)
+          @user_params[:enrollment_term_id] = term.id
+          json = api_call(:get, @user_path, @user_params)
+          expect(json.length).to eq(1)
+          expect(json.first['id']).to eq e.id
         end
 
         it "returns an error if the user is not in the grading period" do
@@ -926,6 +965,7 @@ describe EnrollmentsApiController, type: :request do
             'start_at'                           => nil,
             'end_at'                             => nil,
             'last_activity_at'                   => nil,
+            'last_attended_at'                   => nil,
             'total_activity_time'                => 0
         })
       end
@@ -985,6 +1025,7 @@ describe EnrollmentsApiController, type: :request do
             'start_at'  => nil,
             'end_at'  => nil,
             'last_activity_at' => nil,
+            'last_attended_at' => nil,
             'total_activity_time' => 0
           }
         }
@@ -1195,6 +1236,7 @@ describe EnrollmentsApiController, type: :request do
             'start_at'           => nil,
             'end_at'             => nil,
             'last_activity_at'   => e.last_activity_at.xmlschema,
+            'last_attended_at'   => nil,
             'total_activity_time' => e.total_activity_time
           }
         }
@@ -1391,6 +1433,7 @@ describe EnrollmentsApiController, type: :request do
             'start_at' => nil,
             'end_at' => nil,
             'last_activity_at' => nil,
+            'last_attended_at' => nil,
             'total_activity_time' => 0,
             'user' => {
               'name' => e.user.name,
@@ -1443,6 +1486,7 @@ describe EnrollmentsApiController, type: :request do
             'start_at'                           => nil,
             'end_at'                             => nil,
             'last_activity_at'                   => nil,
+            'last_attended_at'                   => nil,
             'total_activity_time'                => 0
         })
       end
@@ -1489,6 +1533,7 @@ describe EnrollmentsApiController, type: :request do
             'start_at'           => nil,
             'end_at'             => nil,
             'last_activity_at'   => nil,
+            'last_attended_at'   => nil,
             'total_activity_time' => 0
           }
         }
@@ -1540,6 +1585,21 @@ describe EnrollmentsApiController, type: :request do
         expect(json.map { |e| e['id'].to_i }.sort).to eq @user.enrollments.map(&:id).sort
       end
 
+      it "excludes invited enrollments in soft-concluded courses" do
+        term = Account.default.enrollment_terms.create! :end_at => 1.day.ago
+
+        enrollment1 = course_with_student :enrollment_state => :invited
+        enrollment1.course.offer!
+        enrollment1.course.enrollment_term = term
+        enrollment1.course.save!
+
+        enrollment2 = course_with_student :enrollment_state => :invited, :user => @student
+        enrollment2.course.offer!
+
+        json = api_call(:get, "/api/v1/users/self/enrollments", @user_params.merge(:user_id => 'self'))
+        expect(json.map { |el| el['id'] }).to match_array([enrollment2.id])
+      end
+
       it "should not include the users' sis and login ids" do
         json = api_call(:get, @path, @params)
         json.each do |res|
@@ -1589,6 +1649,7 @@ describe EnrollmentsApiController, type: :request do
             'start_at' => nil,
             'end_at' => nil,
             'last_activity_at' => nil,
+            'last_attended_at' => nil,
             'total_activity_time' => 0,
             'course_integration_id' => nil,
             'sis_account_id' => nil,
@@ -1656,7 +1717,7 @@ describe EnrollmentsApiController, type: :request do
           @course.enroll_student(@student, enrollment_state: 'active')
         end
         @observer = user_factory(active_all: true, active_state: 'active')
-        @observer.user_observees.create do |uo|
+        @observer.as_observer_observation_links.create do |uo|
           uo.user_id = @student.id
         end
         @user = @observer
@@ -1746,6 +1807,7 @@ describe EnrollmentsApiController, type: :request do
             'start_at' => nil,
             'end_at' => nil,
             'last_activity_at' => nil,
+            'last_attended_at' => nil,
             'total_activity_time' => 0
           }
           h['grades'] = {
@@ -1851,6 +1913,7 @@ describe EnrollmentsApiController, type: :request do
             'start_at'                           => nil,
             'end_at'                             => nil,
             'last_activity_at'                   => nil,
+            'last_attended_at'                   => nil,
             'total_activity_time'                => 0,
             'course_integration_id' => nil,
             'sis_account_id' => nil,
@@ -1913,6 +1976,7 @@ describe EnrollmentsApiController, type: :request do
             'start_at'                           => nil,
             'end_at'                             => nil,
             'last_activity_at'                   => nil,
+            'last_attended_at'                   => nil,
             'total_activity_time'                => 0,
             'course_integration_id' => nil,
             'sis_account_id' => nil,
@@ -2076,6 +2140,7 @@ describe EnrollmentsApiController, type: :request do
             'start_at'   => nil,
             'end_at'     => nil,
             'last_activity_at' => nil,
+            'last_attended_at' => nil,
             'total_activity_time' => 0,
             'user' => {
               'name' => e.user.name,
@@ -2114,6 +2179,7 @@ describe EnrollmentsApiController, type: :request do
             'start_at'   => nil,
             'end_at'     => nil,
             'last_activity_at' => nil,
+            'last_attended_at' => nil,
             'total_activity_time' => 0,
             'user' => {
               'name' => e.user.name,
@@ -2287,4 +2353,3 @@ describe EnrollmentsApiController, type: :request do
     end
   end
 end
-

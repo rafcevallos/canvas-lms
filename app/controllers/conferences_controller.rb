@@ -347,6 +347,26 @@ class ConferencesController < ApplicationController
     end
   end
 
+  def recording
+    if authorized_action(@conference, @current_user, :read)
+      @response = @conference.recording(params[:recording_id]) || {}
+      respond_to do |format|
+        format.html { redirect_to named_context_url(@context, :context_conferences_url) }
+        format.json { render :json => @response }
+      end
+    end
+  end
+
+  def delete_recording
+    if authorized_action(@conference, @current_user, :delete)
+      @response = @conference.delete_recording(params[:recording_id])
+      respond_to do |format|
+        format.html { redirect_to named_context_url(@context, :context_conferences_url) }
+        format.json { render :json => @response, :status => :ok }
+      end
+    end
+  end
+
   protected
 
   def require_config

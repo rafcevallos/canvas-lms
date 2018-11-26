@@ -173,7 +173,7 @@ module Importers
           item.workflow_state = (hash[:available] || !item.can_unpublish?) ? 'available' : 'unpublished'
           item.saved_by = :migration
           item.quiz_groups.destroy_all
-          item.quiz_questions.destroy_all
+          item.quiz_questions.preload(assessment_question: :assessment_question_bank).destroy_all
           item.save
         end
       end
@@ -182,12 +182,12 @@ module Importers
       hash[:due_at] ||= hash[:due_date] if hash.has_key?(:due_date)
       hash[:due_at] ||= hash[:grading][:due_date] if hash[:grading]
       master_migration = migration&.for_master_course_import? # propagate null dates only for blueprint syncs
-      item.lock_at = Canvas::Migration::MigratorHelper.get_utc_time_from_timestamp(hash[:lock_at]) if hash.has_key?(:lock_at) && (master_migration || hash[:lock_at].present?)
-      item.unlock_at = Canvas::Migration::MigratorHelper.get_utc_time_from_timestamp(hash[:unlock_at]) if hash.has_key?(:unlock_at) && (master_migration || hash[:unlock_at].present?)
-      item.due_at = Canvas::Migration::MigratorHelper.get_utc_time_from_timestamp(hash[:due_at]) if hash.has_key?(:due_at) && (master_migration || hash[:due_at].present?)
-      item.show_correct_answers_at = Canvas::Migration::MigratorHelper.get_utc_time_from_timestamp(hash[:show_correct_answers_at]) if hash[:show_correct_answers_at]
-      item.hide_correct_answers_at = Canvas::Migration::MigratorHelper.get_utc_time_from_timestamp(hash[:hide_correct_answers_at]) if hash[:hide_correct_answers_at]
-      item.scoring_policy = hash[:which_attempt_to_keep] if hash[:which_attempt_to_keep]
+      item.lock_at = Canvas::Migration::MigratorHelper.get_utc_time_from_timestamp(hash[:lock_at]) if master_migration || hash[:lock_at]
+      item.unlock_at = Canvas::Migration::MigratorHelper.get_utc_time_from_timestamp(hash[:unlock_at]) if master_migration || hash[:unlock_at]
+      item.due_at = Canvas::Migration::MigratorHelper.get_utc_time_from_timestamp(hash[:due_at]) if master_migration || hash[:due_at]
+      item.show_correct_answers_at = Canvas::Migration::MigratorHelper.get_utc_time_from_timestamp(hash[:show_correct_answers_at]) if master_migration || hash[:show_correct_answers_at]
+      item.hide_correct_answers_at = Canvas::Migration::MigratorHelper.get_utc_time_from_timestamp(hash[:hide_correct_answers_at]) if master_migration || hash[:hide_correct_answers_at]
+      item.scoring_policy = hash[:which_attempt_to_keep] if master_migration || hash[:which_attempt_to_keep]
 
       missing_links = []
       item.description = migration.convert_html(hash[:description], :quiz, hash[:migration_id], :description)
@@ -218,7 +218,11 @@ module Importers
         only_visible_to_overrides
       ].each do |attr|
         attr = attr.to_sym
-        item.send("#{attr}=", hash[attr]) if hash.key?(attr)
+        if hash.key?(attr)
+          item.send("#{attr}=", hash[attr])
+        elsif master_migration
+          item.send("#{attr}=", nil)
+        end
       end
 
       item.saved_by = :migration
@@ -302,8 +306,14 @@ module Importers
         return if item.edit_types_locked_for_overwrite_on_import.include?(:content)
 
         if hash[:questions]
-          # either the quiz hasn't been changed downstream or we've re-locked it - delete all the questions we're not going to (re)import in
-          importing_question_mig_ids = hash[:questions].map{|q| q[:questions] ? q[:questions].map{|qq| qq[:migration_id]} : q[:migration_id]}.flatten
+          # either the quiz hasn't been changed downstream or we've re-locked it - delete all the questions/question_groups we're not going to (re)import in
+          importing_qgroup_mig_ids = hash[:questions].select{|q| q[:question_type] == "question_group"}.map{|qg| qg[:migration_id]}
+          item.quiz_groups.where.not(:migration_id => importing_qgroup_mig_ids).destroy_all
+
+          importing_question_mig_ids = hash[:questions].map{|q| q[:questions] ?
+            q[:questions].map{|qq| qq[:quiz_question_migration_id] || qq[:migration_id]} :
+            q[:quiz_question_migration_id] || q[:migration_id]
+          }.flatten
           item.quiz_questions.active.where.not(:migration_id => importing_question_mig_ids).update_all(:workflow_state => 'deleted')
         end
       end

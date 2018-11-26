@@ -71,6 +71,13 @@ describe "discussions" do
         expect(DiscussionTopic.last.podcast_enabled).to be_truthy
       end
 
+      it "should not display the section specific announcer if the FF is disabled" do
+        get url
+        graded_checkbox = f('input[type=checkbox][name="assignment[set_assignment]"]')
+        graded_checkbox.click
+        expect(f("body")).not_to contain_css('input[id^="Autocomplete"]')
+      end
+
       context "graded" do
         it "should allow creating multiple due dates", priority: "1", test_id: 150468 do
           assignment_group
@@ -172,7 +179,7 @@ describe "discussions" do
         expect_new_page_load {submit_form('.form-actions')}
         expect(f('.entry-content').text).to include("This topic is locked until #{unlock_text}")
         expect_new_page_load{f('#section-tabs .discussions').click}
-        expect(f(' .discussion').text).to include("Not available until #{unlock_text_index_page}")
+        expect(f('.discussion-availability').text).to include("Not available until #{unlock_text_index_page}")
       end
 
       it "should allow a student to create a discussion", priority: "1", test_id: 150471 do

@@ -1,3 +1,21 @@
+#
+# Copyright (C) 2013 - present Instructure, Inc.
+#
+# This file is part of Canvas.
+#
+# Canvas is free software: you can redistribute it and/or modify it under
+# the terms of the GNU Affero General Public License as published by the Free
+# Software Foundation, version 3 of the License.
+#
+# Canvas is distributed in the hope that it will be useful, but WITHOUT ANY
+# WARRANTY; without even the implied warranty of MERCHANTABILITY or FITNESS FOR
+# A PARTICULAR PURPOSE. See the GNU Affero General Public License for more
+# details.
+#
+# You should have received a copy of the GNU Affero General Public License along
+# with this program. If not, see <http://www.gnu.org/licenses/>.
+#
+
 require 'hash_view'
 
 class RouteView < HashView
@@ -45,7 +63,7 @@ class RouteView < HashView
 
   def query_args
     method_view.raw_arguments.map do |tag|
-      ArgumentView.new(tag.text, verb, path_variables)
+      ArgumentView.new(tag.text, verb, path_variables, deprecated: tag.tag_name&.downcase == 'deprecated_argument')
     end
   end
 
@@ -67,6 +85,10 @@ class RouteView < HashView
     arguments.map { |arg| arg.to_swagger }
   end
 
+  def response_fields
+    method_view.raw_response_fields.map { |tag| ResponseFieldView.new(tag).to_swagger }
+  end
+
   def nickname
     method_view.nickname + method_view.unique_nickname_suffix(self)
   end
@@ -78,6 +100,9 @@ class RouteView < HashView
       "notes" => method_view.desc,
       "nickname" => nickname,
       "parameters" => parameters,
+      "response_fields" => response_fields,
+      "deprecated" => method_view.deprecated?,
+      "deprecation_description" => method_view.deprecation_description
     }.merge(method_view.swagger_type)
   end
 

@@ -23,7 +23,7 @@ class CourseSection < ActiveRecord::Base
   belongs_to :nonxlist_course, :class_name => 'Course'
   belongs_to :root_account, :class_name => 'Account'
   belongs_to :enrollment_term
-  has_many :enrollments, -> { preload(:user).where("enrollments.workflow_state<>'deleted'") }, dependent: :destroy
+  has_many :enrollments, -> { preload(:user).where("enrollments.workflow_state<>'deleted'") }
   has_many :all_enrollments, :class_name => 'Enrollment'
   has_many :student_enrollments, -> { where("enrollments.workflow_state NOT IN ('deleted', 'completed', 'rejected', 'inactive')").preload(:user) }, class_name: 'StudentEnrollment'
   has_many :students, :through => :student_enrollments, :source => :user
@@ -69,12 +69,14 @@ class CourseSection < ActiveRecord::Base
   end
 
   def delete_enrollments_later_if_deleted
-    send_later_if_production(:delete_enrollments_if_deleted) if workflow_state == 'deleted' && workflow_state_changed?
+    send_later_if_production(:delete_enrollments_if_deleted) if workflow_state == 'deleted' && saved_change_to_workflow_state?
   end
 
   def delete_enrollments_if_deleted
     if workflow_state == 'deleted'
-      self.enrollments.active.find_each(&:destroy)
+      self.enrollments.where.not(workflow_state: 'deleted').find_in_batches do |batch|
+        Enrollment::BatchStateUpdater.destroy_batch(batch)
+      end
     end
   end
 
@@ -162,9 +164,10 @@ class CourseSection < ActiveRecord::Base
   end
 
   def update_account_associations_if_changed
-    if (self.course_id_changed? || self.nonxlist_course_id_changed?) && !Course.skip_updating_account_associations?
-      Course.send_later_if_production(:update_account_associations,
-                                      [self.course_id, self.course_id_was, self.nonxlist_course_id, self.nonxlist_course_id_was].compact.uniq)
+    if (self.saved_change_to_course_id? || self.saved_change_to_nonxlist_course_id?) && !Course.skip_updating_account_associations?
+      Course.send_later_if_production_enqueue_args(:update_account_associations,
+                                      {:n_strand => ["update_account_associations", self.root_account_id]},
+                                      [self.course_id, self.course_id_before_last_save, self.nonxlist_course_id, self.nonxlist_course_id_before_last_save].compact.uniq)
     end
   end
 
@@ -237,21 +240,17 @@ class CourseSection < ActiveRecord::Base
     end
     self.save!
     self.all_enrollments.update_all all_attrs
-    Assignment.where(context: [old_course, self.course]).touch_all
+    Assignment.suspend_due_date_caching do
+      Assignment.where(context: [old_course, self.course]).touch_all
+    end
     EnrollmentState.send_later_if_production(:invalidate_states_for_course_or_section, self)
     User.send_later_if_production(:update_account_associations, user_ids) if old_course.account_id != course.account_id && !User.skip_updating_account_associations?
     if old_course.id != self.course_id && old_course.id != self.nonxlist_course_id
       old_course.send_later_if_production(:update_account_associations) unless Course.skip_updating_account_associations?
     end
 
-    # generate submissions in the new course for the students being cross-listed
-    DueDateCacher.recompute_course(course)
-
-    if opts.include?(:run_jobs_immediately)
-      course.recompute_student_scores_without_send_later(user_ids)
-    else
-      course.recompute_student_scores(user_ids)
-    end
+    run_immediately = opts.include?(:run_jobs_immediately)
+    DueDateCacher.recompute_users_for_course(user_ids, course, nil, run_immediately: run_immediately, update_grades: true)
   end
 
   def crosslist_to_course(course, *opts)
@@ -303,16 +302,36 @@ class CourseSection < ActiveRecord::Base
     save!
   end
 
+  def self.destroy_batch(batch, sis_batch: nil, batch_mode: false)
+    raise ArgumentError, 'Cannot call with more than 1000 sections' if batch.count > 1000
+    cs = CourseSection.where(id: batch).select(:id, :workflow_state).to_a
+    data = SisBatchRollBackData.build_dependent_data(sis_batch: sis_batch, contexts: cs, updated_state: 'deleted', batch_mode_delete: batch_mode)
+    CourseSection.where(id: cs.map(&:id)).update_all(workflow_state: 'deleted', updated_at: Time.zone.now)
+    Enrollment.not_fake.where(course_section_id: cs.map(&:id)).active.find_in_batches do |e_batch|
+      Shackles.activate(:master) do
+        new_data = Enrollment::BatchStateUpdater.destroy_batch(e_batch, sis_batch: sis_batch, batch_mode: batch_mode)
+        data.push(*new_data)
+        SisBatchRollBackData.bulk_insert_roll_back_data(data)
+        data = []
+      end
+    end
+    AssignmentOverride.where(set_type: 'CourseSection', set_id: cs.map(&:id)).find_each(&:destroy)
+    DiscussionTopicSectionVisibility.where(course_section_id: cs.map(&:id)).find_in_batches do |d_batch|
+      DiscussionTopicSectionVisibility.where(id: d_batch).update_all(workflow_state: 'deleted')
+    end
+    cs.count
+  end
+
   scope :active, -> { where("course_sections.workflow_state<>'deleted'") }
 
   scope :sis_sections, lambda { |account, *source_ids| where(:root_account_id => account, :sis_source_id => source_ids).order(:sis_source_id) }
 
   def common_to_users?(users)
-    users.all?{ |user| self.student_enrollments.active.for_user(user).count > 0 }
+    users.all?{ |user| self.student_enrollments.active.for_user(user).exists? }
   end
 
   def update_enrollment_states_if_necessary
-    if self.restrict_enrollments_to_section_dates_changed? || (self.restrict_enrollments_to_section_dates? && (changes.keys & %w{start_at end_at}).any?)
+    if self.saved_change_to_restrict_enrollments_to_section_dates? || (self.restrict_enrollments_to_section_dates? && (saved_changes.keys & %w{start_at end_at}).any?)
       EnrollmentState.send_later_if_production(:invalidate_states_for_course_or_section, self)
     end
   end

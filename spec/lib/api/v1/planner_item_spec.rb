@@ -21,16 +21,13 @@ describe Api::V1::PlannerItem do
   class PlannerItemHarness
     include Api::V1::PlannerItem
 
-    def api_v1_users_todo_ignore_url(*args); end
     def assignment_json(*args); end
-    def speed_grader_course_gradebook_url(*args); end
     def quiz_json(*args); end
-    def course_quiz_url(*args); end
-    def course_assignment_url(*args); end
     def wiki_page_json(*args); end
     def discussion_topic_api_json(*args); end
-    def named_context_url(*args); end
-    def api_v1_planner_notes_show_path(*args); end
+    def named_context_url(*args); "named_context_url"; end
+    def course_assignment_submission_url(*args); 'course_assignment_submission_url'; end
+    def calendar_event_json(*args); end
   end
 
   before :once do
@@ -57,55 +54,38 @@ describe Api::V1::PlannerItem do
   describe '.planner_item_json' do
     it 'should return with a plannable_date for the respective item' do
       asg_due_at = 1.week.ago
-      asg = assignment_model course: @couse, submission_types: 'online_text_entry', due_at: asg_due_at
+      asg = assignment_model course: @course, submission_types: 'online_text_entry', due_at: asg_due_at
       asg_hash = api.planner_item_json(asg, @student, session)
       expect(asg_hash[:plannable_date]).to eq asg_due_at
 
       dt_todo_date = 1.week.from_now
-      dt = discussion_topic_model course: @couse, todo_date: dt_todo_date
+      dt = discussion_topic_model course: @course, todo_date: dt_todo_date
       dt_hash = api.planner_item_json(dt, @student, session)
       expect(dt_hash[:plannable_date]).to eq dt_todo_date
 
       wiki_todo_date = 1.day.ago
-      wiki = wiki_page_model course: @couse, todo_date: wiki_todo_date
+      wiki = wiki_page_model course: @course, todo_date: wiki_todo_date
       wiki_hash = api.planner_item_json(wiki, @student, session)
       expect(wiki_hash[:plannable_date]).to eq wiki_todo_date
 
       annc_post_date = 1.day.from_now
-      annc = announcement_model context: @couse, posted_at: annc_post_date
+      annc = announcement_model context: @course, posted_at: annc_post_date
       annc_hash = api.planner_item_json(annc, @student, session)
       expect(annc_hash[:plannable_date]).to eq annc_post_date
+
+      event_start_date = 2.days.from_now
+      event = calendar_event_model(start_at: event_start_date)
+      event_hash = api.planner_item_json(event, @student, session)
+      expect(event_hash[:plannable_date]).to eq event_start_date
     end
 
-    it 'should show the assignment for the plannable_id if one exists' do
-      asg = assignment_model course: @couse, submission_types: 'online_text_entry'
-      dt = @course.discussion_topics.create!(assignment: asg, title: 'Assignment DT')
-      dt_hash = api.planner_item_json(dt, @student, session)
-      expect(dt_hash[:plannable_id]).to eq asg.id
-    end
-
-    context 'with an existing planner override' do
-      it 'should return the planner visibility state' do
-        teacher_hash = api.planner_item_json(@assignment, @teacher, session)
-        student_hash = api.planner_item_json(@assignment, @student, session)
-
-        expect(teacher_hash[:visible_in_planner]).to be true
-        expect(student_hash[:visible_in_planner]).to be false
-      end
-
+    context 'planner overrides' do
       it 'should return the planner override id' do
         teacher_hash = api.planner_item_json(@assignment, @teacher, session)
         student_hash = api.planner_item_json(@assignment, @student, session)
 
         expect(teacher_hash[:planner_override][:id]).to eq @teacher_override.id
         expect(student_hash[:planner_override][:id]).to eq @student_override.id
-      end
-    end
-
-    context 'without an existing planner override' do
-      it 'should return true for `visible_in_planner`' do
-        json = api.planner_item_json(@quiz.assignment, @student, session)
-        expect(json[:visible_in_planner]).to be true
       end
 
       it 'should have a nil planner_override value' do
@@ -190,6 +170,73 @@ describe Api::V1::PlannerItem do
         expect(json[:submissions][:has_feedback]).to be true
         expect(json[:submissions][:graded]).to be false
       end
+
+      it 'should include comment data for assignments with feedback' do
+        submission = @assignment.submit_homework(@student, body: "the stuff")
+        submission.add_comment(user: @teacher, comment: "nice work, fam")
+        submission.update(score: 10)
+        submission.grade_it!
+
+        json = api.planner_item_json(@assignment, @student, session, { start_at: 1.week.ago })
+        expect(json[:submissions][:has_feedback]).to be true
+        expect(json[:submissions][:feedback]).to eq({
+                                                      comment: "nice work, fam",
+                                                      author_name: @teacher.name,
+                                                      author_avatar_url: @teacher.avatar_url,
+                                                      is_media: false
+                                                    })
+      end
+
+      it 'should discard comments by the user herself' do
+        submission = @assignment.submit_homework(@student, body: "the stuff")
+        submission.add_comment(user: @teacher, comment: "nice work, fam")
+        submission.add_comment(user: @student, comment: "I know, right?")
+        submission.update(score: 10)
+        submission.grade_it!
+
+        json = api.planner_item_json(@assignment, @student, session, { start_at: 1.week.ago })
+        expect(json[:submissions][:has_feedback]).to be true
+        expect(json[:submissions][:feedback]).to eq({
+                                                      comment: "nice work, fam",
+                                                      author_name: @teacher.name,
+                                                      author_avatar_url: @teacher.avatar_url,
+                                                      is_media: false
+                                                    })
+      end
+
+      it 'should select the most recent comment' do
+        submission = @assignment.submit_homework(@student, body: "the stuff")
+        submission.add_comment(user: @teacher, comment: "nice work, fam")
+        submission.add_comment(user: @student, comment: "I know, right?")
+        submission.add_comment(user: @teacher, comment: "don't let it go to your head.")
+        submission.update(score: 10)
+        submission.grade_it!
+
+        json = api.planner_item_json(@assignment, @student, session, { start_at: 1.week.ago })
+        expect(json[:submissions][:has_feedback]).to be true
+        expect(json[:submissions][:feedback]).to eq({
+                                                      comment: "don't let it go to your head.",
+                                                      author_name: @teacher.name,
+                                                      author_avatar_url: @teacher.avatar_url,
+                                                      is_media: false
+                                                    })
+      end
+
+      it 'should include indicate is_media if comment has a media_comment_id' do
+        submission = @assignment.submit_homework(@student, body: "the stuff")
+        submission.add_comment(user: @teacher, comment: "nice work, fam", media_comment_id: 2)
+        submission.update(score: 10)
+        submission.grade_it!
+
+        json = api.planner_item_json(@assignment, @student, session, { start_at: 1.week.ago })
+        expect(json[:submissions][:has_feedback]).to be true
+        expect(json[:submissions][:feedback]).to eq({
+                                                      comment: "nice work, fam",
+                                                      author_name: @teacher.name,
+                                                      author_avatar_url: @teacher.avatar_url,
+                                                      is_media: true
+                                                    })
+      end
     end
   end
 
@@ -253,6 +300,22 @@ describe Api::V1::PlannerItem do
     it 'should return false for items that cannot have new activity' do
       planner_note_model(user: @student)
       expect(api.planner_item_json(@planner_note, @student, session)[:new_activity]).to be false
+    end
+  end
+
+  describe "#html_url" do
+    it "links to an assignment's submission if appropriate" do
+      assignment_model course: @course, submission_types: 'online_text_entry'
+      expect(api.planner_item_json(@assignment, @student, session)[:html_url]).to eq 'named_context_url'
+      @assignment.submit_homework(@student, body: "...")
+      expect(api.planner_item_json(@assignment, @student, session)[:html_url]).to eq 'course_assignment_submission_url'
+    end
+
+    it "links to a graded discussion topic's submission if appropriate" do
+      group_discussion_assignment
+      expect(api.planner_item_json(@topic.assignment, @student, session)[:html_url]).to eq 'named_context_url'
+      graded_submission_model(assignment: @topic.assignment, user: @student).update_attributes(score: 5)
+      expect(api.planner_item_json(@topic.assignment, @student, session)[:html_url]).to eq 'course_assignment_submission_url'
     end
   end
 end

@@ -21,8 +21,6 @@ class Gradezilla
   class << self
     include SeleniumDependencies
 
-    private
-
     # Student Headings
     STUDENT_COLUMN_MENU_SELECTOR = '.container_0 .Gradebook__ColumnHeaderAction'.freeze
 
@@ -44,7 +42,7 @@ class Gradezilla
     end
 
     def notes_option
-      f('span [data-menu-item-id="show-notes-column"]')
+      fj('[role="menuitemcheckbox"]:contains("Notes")')
     end
 
     def save_button
@@ -54,7 +52,7 @@ class Gradezilla
     # ---------------------NEW-----------------------
     # assignment header column elements
     def assignment_header_menu_element(id)
-      f(".slick-header-column[id*='assignment_#{id}'] .Gradebook__ColumnHeaderAction [id*='PopoverMenu']")
+      f(".slick-header-column[id*='assignment_#{id}'] .Gradebook__ColumnHeaderAction [id*='Menu']")
     end
 
     def assignment_header_menu_item_element(item_name)
@@ -73,13 +71,17 @@ class Gradezilla
       select_assignment_header_cell_element(title).find('.assignment-name')
     end
 
+    def assignment_menu_selector(menu_text)
+      fj("span[role='menuitem']:contains('#{menu_text}')")
+    end
+
     # student header column elements
     def student_column_menu
       f("span .Gradebook__ColumnHeaderAction")
     end
 
     def student_header_menu_main_element(menu)
-      fj("[role=menu][aria-labelledby*=PopoverMenu] button:contains('#{menu}')")
+      fj("[role=menu][aria-labelledby*=Menu] button:contains('#{menu}')")
     end
 
     def student_header_submenu_item_element(sub_menu_item)
@@ -95,7 +97,7 @@ class Gradezilla
     end
 
     def student_column_cell_element(x,y)
-      f("div .slick-cell.l#{x}.r#{y}.meta-cell")
+      f("div .slick-cell.b#{x}.f#{y}.meta-cell")
     end
 
     def total_header_options_menu_item_element(menu_item)
@@ -104,7 +106,7 @@ class Gradezilla
     # ---------------------END NEW-----------------------
 
     def menu_container(container_id)
-      selector = '[aria-expanded=true][role=menu]'
+      selector = '[role=menu]'
       selector += "[aria-labelledby=#{container_id}]" if container_id
 
       f(selector)
@@ -167,7 +169,7 @@ class Gradezilla
     end
 
     def filters_element
-      fj('li:contains(Filters)')
+      fj('li:contains(Filters) button')
     end
 
     def show_grading_period_filter_element
@@ -186,8 +188,6 @@ class Gradezilla
       fj('li li:contains("Unpublished Assignments")')
     end
 
-    public
-
     def body
       f('body')
     end
@@ -201,7 +201,7 @@ class Gradezilla
     end
 
     def expanded_popover_menu_selector
-      '[aria-labelledby*="PopoverMenu"][aria-expanded="true"]'
+      '[role="menu"][aria-labelledby*="Menu"]'
     end
 
     def expanded_popover_menu
@@ -220,8 +220,6 @@ class Gradezilla
     def visit(course)
       Account.default.enable_feature!(:new_gradebook)
       get "/courses/#{course.id}/gradebook/change_gradebook_version?version=default"
-      # the pop over menus is too lengthy so make screen bigger
-      make_full_screen
     end
 
     def visit_upload(course)
@@ -442,6 +440,26 @@ class Gradezilla
       total_cell_warning_icon
     end
 
+    def open_display_dialog
+      select_total_column_option('grade-display-switcher')
+    end
+
+    def close_display_dialog
+      f(".ui-icon-closethick").click
+    end
+
+    def toggle_grade_display
+      open_display_dialog
+      dialog = fj('.ui-dialog:visible')
+      submit_dialog(dialog, '.ui-button')
+    end
+
+    def close_dialog_and_dont_show_again
+      dialog = fj('.ui-dialog:visible')
+      fj("#hide_warning").click
+      submit_dialog(dialog, '.ui-button')
+    end
+
     def content_selector
       f("#content")
     end
@@ -549,12 +567,8 @@ class Gradezilla
 
     # ASSIGNMENT COLUMN HEADER OPTIONS
     # css selectors
-    def assignment_header_menu_selector(id)
-      assignment_header_menu_element(id)
-    end
-
     def assignment_header_cell_element(title)
-      f(".slick-header-column[title=\"#{title}\"]")
+      f(assignment_header_cell_selector(title))
     end
 
     def assignment_header_menu_trigger_element(assignment_name)
@@ -578,7 +592,7 @@ class Gradezilla
     end
 
     def select_filters
-      filters_element.click
+      hover(filters_element)
     end
 
     def select_view_filter(filter)
@@ -603,7 +617,8 @@ class Gradezilla
       assignment_header_menu_element(assignment_id).click
     end
 
-    def click_assignment_header_menu_element(menuitem)
+    def click_assignment_header_menu_element(assignment_id, menuitem)
+      assignment_header_menu_element(assignment_id).click
       menu_item_id = ""
 
       if menuitem =~ /(message(\-?\s?student)?)/i
@@ -616,12 +631,15 @@ class Gradezilla
         menu_item_id = 'assignment-muter'
       elsif menuitem =~ /(download(\-?\s?submission)?)/i
         menu_item_id = 'download-submissions'
+
       end
       assignment_header_menu_item_element(menu_item_id).click
     end
 
     def click_assignment_popover_sort_by(sort_type)
-      hover(assignment_header_popover_menu_element("Sort by"))
+      assignment_header_popover_menu_element("Sort by").click # focus it
+      assignment_header_popover_menu_element("Sort by").click # open it
+
       sort_by_item = ""
 
       if sort_type =~ /(low[\s\-]to[\s\-]high)/i
@@ -636,6 +654,7 @@ class Gradezilla
         sort_by_item = 'Unposted'
       end
       assignment_header_popover_sub_item_element(sort_by_item).click
+      driver.action.send_keys(:escape).perform
     end
 
     def click_assignment_popover_enter_grade_as(assignment_id, grade_type)
@@ -654,14 +673,17 @@ class Gradezilla
       f(assignment_header_cell_selector(name))
     end
 
+    def select_assignment_header_secondary_label(name)
+      fj(assignment_header_cell_selector(name) + " .Gradebook__ColumnHeaderDetail--secondary")
+    end
+
     def select_assignment_header_cell_label_element(name)
       assignment_header_cell_label_element(name)
     end
 
     # assignment mute toggle
     def toggle_assignment_muting(assignment_id)
-      click_assignment_header_menu(assignment_id)
-      click_assignment_header_menu_element('mute')
+      click_assignment_header_menu_element(assignment_id, 'mute')
       dialog_save_mute_setting.click
       wait_for_ajaximations
     end
@@ -701,6 +723,10 @@ class Gradezilla
 
     def gradebook_slick_header_columns
       ff(".slick-header-column").map(&:text)
+    end
+
+    def overlay_info_screen
+      fj(".overlay_screen")
     end
     # ----------------------END NEW----------------------------
 

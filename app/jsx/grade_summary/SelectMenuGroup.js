@@ -19,11 +19,11 @@
 import PropTypes from 'prop-types';
 import React from 'react';
 
-import Button from '@instructure/ui-core/lib/components/Button';
-import Container from '@instructure/ui-core/lib/components/Container';
-import PresentationContent from '@instructure/ui-core/lib/components/PresentationContent';
-import ScreenReaderContent from '@instructure/ui-core/lib/components/ScreenReaderContent';
-import Text from '@instructure/ui-core/lib/components/Text';
+import Button from '@instructure/ui-buttons/lib/components/Button';
+import View from '@instructure/ui-layout/lib/components/View';
+import PresentationContent from '@instructure/ui-a11y/lib/components/PresentationContent';
+import ScreenReaderContent from '@instructure/ui-a11y/lib/components/ScreenReaderContent';
+import Text from '@instructure/ui-elements/lib/components/Text';
 
 import {showFlashError} from '../shared/FlashAlert';
 import I18n from 'i18n!grade_summary';
@@ -35,7 +35,8 @@ export default class SelectMenuGroup extends React.Component {
     courses: PropTypes.arrayOf(PropTypes.shape({
       id: PropTypes.string.isRequired,
       nickname: PropTypes.string.isRequired,
-      url: PropTypes.string.isRequired
+      url: PropTypes.string.isRequired,
+      gradingPeriodSetId: PropTypes.string
     })).isRequired,
     currentUserID: PropTypes.string.isRequired,
     displayPageContent: PropTypes.func.isRequired,
@@ -119,16 +120,26 @@ export default class SelectMenuGroup extends React.Component {
   }
 
   reloadPage = () => {
-    const baseURL = this.props.courses.find(course => course.id === this.state.courseID).url;
-    const studentURL = this.state.studentID === this.props.currentUserID ? '' : `/${this.state.studentID}`;
-    const params = this.state.gradingPeriodID ? `?grading_period_id=${this.state.gradingPeriodID}` : '';
-    const url = `${baseURL}${studentURL}${params}`;
-    this.props.goToURL(url);
+    const { state: { courseID: currentlySelectedCourseId }, props: { selectedCourseID: initialCourseId } } = this;
+    const initialCourse = this.props.courses.find(course => course.id === initialCourseId)
+    const selectedCourse = this.props.courses.find(course => course.id === currentlySelectedCourseId)
+
+    const baseURL = selectedCourse.url
+    const studentURL = this.state.studentID === this.props.currentUserID ? '' : `/${this.state.studentID}`
+    let params
+
+    if (selectedCourse.gradingPeriodSetId && initialCourse.gradingPeriodSetId === selectedCourse.gradingPeriodSetId) {
+      params = this.state.gradingPeriodID ? `?grading_period_id=${this.state.gradingPeriodID}` : ''
+    } else {
+      params = ''
+    }
+
+    this.props.goToURL(`${baseURL}${studentURL}${params}`)
   };
 
   render () {
     return (
-      <Container>
+      <View>
         {this.props.students.length > 1 &&
           <SelectMenu
             defaultValue={this.props.selectedStudentID}
@@ -142,7 +153,7 @@ export default class SelectMenuGroup extends React.Component {
           />
         }
 
-        <Container
+        <View
           as="span"
           style={{ display: "flex", flexWrap: "wrap", alignContent: "flex-end", alignItems: "flex-end"}}
         >
@@ -183,7 +194,7 @@ export default class SelectMenuGroup extends React.Component {
             valueAttribute={1}
           />
 
-          <Container as="div" margin="small small small 0">
+          <View as="div" margin="small small small 0">
             <Button
               disabled={this.state.processing || this.noSelectMenuChanged()}
               id="apply_select_menus"
@@ -197,9 +208,9 @@ export default class SelectMenuGroup extends React.Component {
                 {I18n.t('Apply filters. Note: clicking this button will cause the page to reload.')}
               </ScreenReaderContent>
             </Button>
-          </Container>
-        </Container>
-      </Container>
+          </View>
+        </View>
+      </View>
     );
   }
 }

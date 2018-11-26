@@ -47,6 +47,9 @@
   class="
     context_module_item
     <%= 'student-view' if @is_student %>
+    <% if module_item&.content&.respond_to?("can_duplicate?") %>
+      <%= 'cannot-duplicate' if !module_item&.content&.can_duplicate?%>
+    <% end %>
     <%= module_item.content_type_class if module_item %>
     <%= 'also_assignment' if module_item && module_item.graded? %>
     indent_<%= module_item.try_rescue(:indent) || '0' %>
@@ -79,7 +82,7 @@
     <span class="type_icon" title="<%= module_item_translated_content_type(module_item) %>">
       <span class="ig-type-icon">
         <i class="icon-document" aria-label="<%= t('Item type: Document') %>"></i>
-        <i class="icon-download" aria-label="<%= t('Item type: Download') %>"></i>
+        <i class="icon-paperclip" aria-label="<%= t('Item type: Download') %>"></i>
         <i class="icon-discussion" aria-label="<%= t('Item type: Discussion') %>"></i>
         <i class="icon-assignment" aria-label="<%= t('Item type: Assignment') %>"></i>
         <i class="icon-quiz" aria-label="<%= t('Item type: Quiz') %>"></i>

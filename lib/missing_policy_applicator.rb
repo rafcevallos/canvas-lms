@@ -52,7 +52,9 @@ class MissingPolicyApplicator
       score: score,
       grade: grade,
       published_score: score,
-      published_grade: grade
+      published_grade: grade,
+      grade_matches_current_submission: true,
+      workflow_state: "graded"
     )
     # rubocop:enable SkipsModelValidations
 

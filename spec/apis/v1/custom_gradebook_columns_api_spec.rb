@@ -97,8 +97,8 @@ describe CustomGradebookColumnsApiController, type: :request do
         "/api/v1/courses/#{@course.id}/custom_gradebook_columns",
         {course_id: @course.to_param, action: "create",
          controller: "custom_gradebook_columns_api", format: "json"},
-        "column[title]" => "Blah blah blah", "column[position]" => 1
-      expect(response).to be_success
+        "column[title]" => "Blah blah blah", "column[position]" => 1, "column[read_only]" => true
+      expect(response).to be_successful
       expect(CustomGradebookColumn.find(json["id"])).not_to be_nil
     end
   end
@@ -122,9 +122,10 @@ describe CustomGradebookColumnsApiController, type: :request do
         "/api/v1/courses/#{@course.id}/custom_gradebook_columns/#{@col.id}",
         {course_id: @course.to_param, id: @col.to_param, action: "update",
          controller: "custom_gradebook_columns_api", format: "json"},
-        "column[title]" => "Bar"
-      expect(response).to be_success
+        "column[title]" => "Bar", "column[read_only]" => true
+      expect(response).to be_successful
       expect(json["title"]).to eq "Bar"
+      expect(json["read_only"]).to eq(true)
       expect(@col.reload.title).to eq "Bar"
     end
   end
@@ -148,7 +149,7 @@ describe CustomGradebookColumnsApiController, type: :request do
         "/api/v1/courses/#{@course.id}/custom_gradebook_columns/#{@col.id}",
         course_id: @course.to_param, id: @col.to_param, action: "destroy",
         controller: "custom_gradebook_columns_api", format: "json"
-      expect(response).to be_success
+      expect(response).to be_successful
       expect(@col.reload).to be_deleted
     end
 
@@ -158,7 +159,7 @@ describe CustomGradebookColumnsApiController, type: :request do
         {course_id: @course.to_param, id: @col.to_param, action: "update",
          controller: "custom_gradebook_columns_api", format: "json"},
         "column[hidden]" => "yes"
-      expect(response).to be_success
+      expect(response).to be_successful
       expect(@col.reload).to be_hidden
 
       json = api_call :put,
@@ -166,7 +167,7 @@ describe CustomGradebookColumnsApiController, type: :request do
         {course_id: @course.to_param, id: @col.to_param, action: "update",
          controller: "custom_gradebook_columns_api", format: "json"},
         "column[hidden]" => "no"
-      expect(response).to be_success
+      expect(response).to be_successful
       expect(@col.reload).not_to be_hidden
     end
   end
@@ -187,7 +188,7 @@ describe CustomGradebookColumnsApiController, type: :request do
         {course_id: @course.to_param, action: "reorder",
          controller: "custom_gradebook_columns_api", format: "json"},
         order: [c3.id, c1.id, c2.id]
-      expect(response).to be_success
+      expect(response).to be_successful
 
       expect(@course.custom_gradebook_columns.reload).to eq [c3, c1, c2]
     end

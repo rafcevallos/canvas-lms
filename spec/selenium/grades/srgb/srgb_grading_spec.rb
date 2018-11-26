@@ -21,7 +21,7 @@ require_relative '../setup/gradebook_setup'
 
 describe 'Screenreader Gradebook grading' do
   include_context 'in-process server selenium tests'
-  include_context 'reusable_course'
+  include_context 'reusable_gradebook_course'
   include GradebookCommon
   include GradebookSetup
 
@@ -151,7 +151,7 @@ describe 'Screenreader Gradebook grading' do
       srgb_page.select_assignment(assignment_1)
 
       # indicates assignment_1 was dropped
-      expect(f('.dropped.muted em')).to include_text('This grade is currently dropped for this student.')
+      expect(f('.dropped.muted')).to include_text('This grade is currently dropped for this student.')
     end
 
     it 'on resubmitted assignments', priority: "2", test_id: 164000 do
@@ -171,7 +171,7 @@ describe 'Screenreader Gradebook grading' do
       srgb_page.select_assignment(assignment_1)
 
       # indicates assignment_1 was resubmitted
-      expect(f('.resubmitted.muted em')).to include_text('This assignment has been resubmitted')
+      expect(f('.resubmitted.muted')).to include_text('This assignment has been resubmitted')
 
       # grade the assignment again
       srgb_page.grade_srgb_assignment(srgb_page.main_grade_input, 10)

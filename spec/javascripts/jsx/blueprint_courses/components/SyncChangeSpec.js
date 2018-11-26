@@ -17,14 +17,14 @@
  */
 
 import React from 'react'
-import * as enzyme from 'enzyme'
+import * as enzyme from 'old-enzyme-2.x-you-need-to-upgrade-this-spec-to-enzyme-3.x-by-importing-just-enzyme'
 import SyncChange from 'jsx/blueprint_courses/components/SyncChange'
-import data from '../sampleData'
+import getSampleData from '../getSampleData'
 
 QUnit.module('SyncChange component')
 
 const defaultProps = () => ({
-  change: data.history[0].changes[0],
+  change: getSampleData().history[0].changes[0],
 })
 
 test('renders the SyncChange component', () => {
@@ -34,10 +34,9 @@ test('renders the SyncChange component', () => {
 })
 
 test('renders the SyncChange component expanded when state.isExpanded = true', () => {
-  const props = defaultProps()
-  props.isLoadingHistory = true
+  const props = {...defaultProps(), isLoadingHistory: true}
   const tree = enzyme.shallow(<SyncChange {...props} />)
-  tree.instance().setState({ isExpanded: true })
+  tree.setState({ isExpanded: true })
   const node = tree.find('.bcs__history-item__change__expanded')
   ok(node.exists())
 })
@@ -57,4 +56,19 @@ test('displays the correct exception count', () => {
   const tree = enzyme.shallow(<SyncChange {...props} />)
   const pill = tree.find('.pill')
   equal(pill.at(0).text(), '3 exceptions')
+})
+
+test('displays the correct exception types', () => {
+  const props = defaultProps()
+  props.isLoadingHistory = true
+  const tree = enzyme.mount(<SyncChange {...props} />)
+  tree.instance().setState({ isExpanded: true })
+  const exceptionGroups = tree.find('li.bcs__history-item__change-exceps__group')
+  let exceptionGroup = exceptionGroups.at(0).find('span').at(0)
+  equal(exceptionGroup.text(), "Points changed exceptions:")
+  exceptionGroup = exceptionGroups.at(1).find('span').at(0)
+  equal(exceptionGroup.text(), "Content changed exceptions:")
+  exceptionGroup = exceptionGroups.at(2).find('span').at(0)
+  equal(exceptionGroup.text(), "Deleted content exceptions:")
+
 })

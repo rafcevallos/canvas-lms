@@ -19,7 +19,7 @@
 /config/*.yml
 /config/environments/*-local.rb
 /config/locales/generated/
-/config/RAILS5_1
+/config/RAILS5_2
 /coverage/
 /coverage-js/
 /db/schema.rb
@@ -27,7 +27,7 @@
 /db/*sql
 /exports/
 Gemfile.lock
-Gemfile.lock.51
+Gemfile.lock.52
 /log/
 mkmf.log
 /node_modules
@@ -51,7 +51,6 @@ yarn-error.log
 # generated client app stuff
 /public/javascripts/client_apps/
 
-
 # canvas-gems
 /gems/*/coverage
 /gems/*/tmp
@@ -59,3 +58,26 @@ yarn-error.log
 
 # user docker compose overrides
 docker-compose.local.*
+
+# sub-packages
+/packages/*/node_modules
+/packages/*/copy-of-what-gets-published-to-npm-registry
+/packages/canvas-planner/lib
+/packages/canvas-planner/es
+/packages/canvas-planner/coverage/
+/packages/canvas-planner/.babel-cache
+
+# pact artifacts
+/reports/
+/pacts/
+
+# generated scope names
+/lib/api_scope_mapper.rb
+
+# generated scopes markdown
+/doc/api/api_token_scopes.md
+
+# js coverage stuff
+.nyc_output
+coverage-jest
+coverage-karma

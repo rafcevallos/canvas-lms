@@ -140,7 +140,7 @@ describe UsersController, type: :request do
              :controller => "users", :action => "ignore_item",
              :format => "json", :purpose => "grading",
              :asset_string => "assignment_#{@a2.id}", :permanent => "1")
-    expect(response).to be_success
+    expect(response).to be_successful
 
     json = api_call(:get, "/api/v1/courses/#{@teacher_course.id}/todo",
                     :controller => "courses", :action => "todo_items",
@@ -157,7 +157,7 @@ describe UsersController, type: :request do
   it "should ignore a todo item until the next change" do
     api_call(:delete, @a2_json['ignore'],
              :controller => "users", :action => "ignore_item", :format => "json", :purpose => "grading", :asset_string => "assignment_#{@a2.id}", :permanent => "0")
-    expect(response).to be_success
+    expect(response).to be_successful
 
     json = api_call(:get, "/api/v1/courses/#{@teacher_course.id}/todo",
                     :controller => "courses", :action => "todo_items", :format => "json", :course_id => @teacher_course.to_param)
@@ -228,12 +228,12 @@ describe UsersController, type: :request do
   it "doesn't include ungraded quizzes if not assigned to user" do
     survey = @student_course.quizzes.create!(quiz_type: 'survey', due_at: 1.day.from_now, only_visible_to_overrides: true)
     survey.publish!
-    override = survey.assignment_overrides.create!(:set => @course.default_section)
+    survey.assignment_overrides.create!(:set => @course.default_section)
 
     survey2 = @student_course.quizzes.create!(quiz_type: 'survey', due_at: 1.day.from_now, only_visible_to_overrides: true)
     survey2.publish!
     section = @course.course_sections.create!
-    override = survey.assignment_overrides.create!(:set => section)
+    survey2.assignment_overrides.create!(:set => section)
 
     json = api_call :get, "/api/v1/users/self/todo?include[]=ungraded_quizzes", :controller => "users",
       :action => "todo_items", :format => "json", :include => %w(ungraded_quizzes)
@@ -245,10 +245,63 @@ describe UsersController, type: :request do
     json = api_call(:get, "/api/v1/users/self/todo",
                     :controller => "users", :action => "todo_items",
                     :format => "json")
-    expect(response).to be_success
+    expect(response).to be_successful
   end
 
-  context 'pagination' do
+  it "doesnt include anything over 4 weeks old" do
+    @student_course.assignments.create! due_at: 5.weeks.ago, workflow_state: 'published', submission_types: 'not_graded'
+    past_survey = @student_course.quizzes.create!(quiz_type: 'survey', due_at: 5.weeks.ago)
+    past_survey.publish!
+
+    json = api_call :get, "/api/v1/users/self/todo?include[]=ungraded_quizzes", :controller => "users",
+      :action => "todo_items", :format => "json", :include => %w(ungraded_quizzes)
+    expect(json.map { |el| el['quiz'] && el['quiz']['id'] }.compact).to eql([])
+
+    json = api_call :get, "/api/v1/courses/#{@student_course.id}/todo?include[]=ungraded_quizzes",
+      :controller => "courses", :action => "todo_items",
+      :format => "json", :course_id => @student_course.to_param, :include => %w(ungraded_quizzes)
+    expect(json.map { |el| el['quiz'] && el['quiz']['id'] }.compact).to eql([])
+  end
+
+  context 'when the assignment is differentiated/ has overrides' do
+    before :each do
+      @course = course_factory(active_all: true)
+      @section = @course.course_sections.create!
+
+      @user = user_factory(active_all: true)
+      @course.enroll_student(@user, { :section => @section }).accept!
+
+      ao = differentiated_assignment(:context => @course, :course_section => @section, :due_at => nil, :submission_types => 'online_text_entry')
+      ao.due_at = 1.day.from_now
+      ao.due_at_overridden = true
+      ao.save!
+
+      survey = @course.quizzes.create!(quiz_type: 'survey', only_visible_to_overrides: true, :due_at => nil)
+      so = survey.assignment_overrides.create!(:set => @section)
+      so.due_at = 1.day.from_now
+      so.due_at_overridden = true
+      so.save!
+      survey.publish!
+    end
+
+
+    it "includes assignments/quizzes with no due_at (users controller)" do
+      json = api_call(:get, "/api/v1/users/self/todo?include[]=ungraded_quizzes",
+                      :controller => "users", :action => "todo_items",
+                      :format => "json", :include => %w(ungraded_quizzes))
+      expect(json.count).to be(2)
+    end
+
+    it "includes assignments/quizzes with no due_at (courses controller)" do
+      json = api_call(:get, "/api/v1/courses/#{@course.id}/todo?include[]=ungraded_quizzes",
+                      :controller => "courses", :action => "todo_items",
+                      :format => "json", :course_id => @course.to_param,
+                      :include => %w(ungraded_quizzes))
+      expect(json.count).to be(2)
+    end
+  end
+
+  context 'with pagination' do
     before :each do
       @teacher = course_with_teacher(:active_all => true, :user => user_with_pseudonym(:active_all => true))
       @teacher_course = @course
@@ -321,6 +374,66 @@ describe UsersController, type: :request do
   end
 
   describe "todo_item_count" do
+    before :once do
+      @teacher = course_with_teacher(:active_all => true, :user => user_with_pseudonym(:active_all => true))
+      @teacher_course = @course
+      @student_course = course_factory(active_all: true)
+      @student_course.enroll_student(@user).accept!
+      # an assignment i need to submit (needs_submitting)
+      batch = []
+      18.times do
+        batch << { :context_type => 'Course',
+                   :context_id => @student_course.id,
+                   :due_at => 6.days.from_now,
+                   :title => 'required work',
+                   :submission_types => 'online_text_entry',
+                   :points_possible => 10,
+                   :workflow_state => 'published' }
+      end
+      Assignment.bulk_insert(batch)
+
+      batch = []
+      assignments = @student_course.assignments
+      assignments.each do |a|
+        batch << { :cached_due_date => 6.days.from_now,
+                   :assignment_id => a.id,
+                   :user_id => @user.id,
+                   :workflow_state => 'unsubmitted' }
+      end
+      Submission.bulk_insert(batch)
+
+      # one assignment submitted
+      assignment = @student_course.assignments.first
+      assignment.submit_homework(@user, :submission_type => 'online_text_entry', :body => 'done')
+      # one assignment ignored
+      assignment = @student_course.assignments[1]
+      @user.ignore_item!(assignment, 'submitting', true)
+
+      # an assignment i created, and a student who submits the assignment (needs_grading)
+      @me = @user
+      @student = user_factory(active_all: true)
+      @user = @me
+      @teacher_course.enroll_student(@student).accept!
+      @teacher_assignment_ids = []
+
+      3.times do
+        a = Assignment.create!(:context => @teacher_course,
+                               :due_at => 1.day.from_now,
+                               :title => 'text',
+                               :submission_types => 'online_text_entry',
+                               :points_possible => 15)
+        a.submit_homework(@student, :submission_type => 'online_text_entry', :body => 'done')
+        @teacher_assignment_ids << a.id
+      end
+      # one assignment graded
+      submission = @teacher_course.assignments[0].submissions[0]
+      submission.workflow_state = 'graded'
+      submission.score = 90
+      submission.save!
+      # one assignment ignored
+      assignment = @teacher_course.assignments[1]
+      @user.ignore_item!(assignment, 'grading', true)
+    end
 
     it "should check for auth" do
       get("/api/v1/users/self/todo_item_count")
@@ -328,11 +441,23 @@ describe UsersController, type: :request do
     end
 
     it "returns the correct count" do
-      10.times { another_submission }
       json = api_call(:get, "/api/v1/users/self/todo_item_count",
                 :controller => "users", :action => "todo_item_count", :format => "json")
-      expect(json['needs_grading_count']).to eq 11
-      expect(json['assignments_needing_submitting']).to eq 1
+      expect(json['needs_grading_count']).to eq 1
+      expect(json['assignments_needing_submitting']).to eq 16
+    end
+
+    it "doesnt count assignments that dont need grading" do
+      a = Assignment.create!(:context => @teacher_course,
+                         :due_at => 1.day.from_now,
+                         :title => 'no grading',
+                         :submission_types => 'on_paper',
+                         :points_possible => 15)
+      a.submit_homework(@student, :submission_type => 'on_paper')
+
+      json = api_call(:get, "/api/v1/users/self/todo_item_count",
+                :controller => "users", :action => "todo_item_count", :format => "json")
+      expect(json['needs_grading_count']).to eq 1
     end
   end
 end

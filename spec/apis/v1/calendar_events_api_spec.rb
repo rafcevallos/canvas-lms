@@ -189,6 +189,21 @@ describe CalendarEventsApiController, type: :request do
       expect(slot).not_to be_nil
     end
 
+    it 'accepts a more compact comma-separated list of appointment group ids' do
+      ags = (0..2).map do |x|
+        ag = AppointmentGroup.create!(:title => "ag #{x}", :new_appointments => [["2012-01-01 12:00:00", "2012-01-01 13:00:00"]], :contexts => [@course])
+        ag.publish!
+        ag
+      end
+      ag_id_list = ags.map(&:id).join(',')
+      student_in_course :active_all => true
+      json = api_call(:get, "/api/v1/calendar_events?start_date=2012-01-01&end_date=2012-01-02&per_page=25&appointment_group_ids=" + ag_id_list, {
+        :controller => 'calendar_events_api', :action => 'index', :format => 'json',
+        :appointment_group_ids => ag_id_list, :start_date => '2012-01-01', :end_date => '2012-01-02', :per_page => '25'})
+      expect(json.map{|e| e['appointment_group_id']}).to match_array(ags.map(&:id))
+      expect(response.headers['Link']).to include 'appointment_group_ids='
+    end
+
     it 'should fail with unauthorized if provided a context the user cannot access' do
       contexts = [@course.asset_string]
 
@@ -651,7 +666,7 @@ describe CalendarEventsApiController, type: :request do
           it "should not allow students to reserve an appointment twice" do
             json = api_call(:post, "/api/v1/calendar_events/#{@event1.id}/reservations", {
               :controller => 'calendar_events_api', :action => 'reserve', :format => 'json', :id => @event1.id.to_s})
-            expect(response).to be_success
+            expect(response).to be_successful
             raw_api_call(:post, "/api/v1/calendar_events/#{@event1.id}/reservations", {
               :controller => 'calendar_events_api', :action => 'reserve', :format => 'json', :id => @event1.id.to_s})
             errors = JSON.parse(response.body)
@@ -700,7 +715,7 @@ describe CalendarEventsApiController, type: :request do
               short_form_id = "#{Shard.current.id}~#{@user.id}"
               api_call(:post, "/api/v1/calendar_events/#{@event1.id}/reservations/#{short_form_id}", {
                 :controller => 'calendar_events_api', :action => 'reserve', :format => 'json', :id => @event1.id.to_s, :participant_id => short_form_id})
-              expect(response).to be_success
+              expect(response).to be_successful
             end
           end
 
@@ -998,6 +1013,16 @@ describe CalendarEventsApiController, type: :request do
       expect(json['start_at']).to eql '2012-01-09T12:00:00Z'
     end
 
+    it 'should not update event if all_day, start_at, and end_at are provided in a request' do
+      event = @course.calendar_events.create(:title => 'event', :start_at => '2012-01-08 12:00:00')
+
+      json = api_call(:put, "/api/v1/calendar_events/#{event.id}",
+                      {:controller => 'calendar_events_api', :action => 'update', :id => event.id.to_s, :format => 'json'},
+                      {:calendar_event => {:start_at => '2012-01-08 12:00:00',:end_at => '2012-01-09 12:00:00', :all_day => true, :title => "ohai"}})
+      expect(json['all_day']).to eql true
+      expect(json['end_at']).to eql '2012-01-09T00:00:00Z'
+    end
+
     it 'should process html content in description on update' do
       event = @course.calendar_events.create(:title => 'event', :start_at => '2012-01-08 12:00:00')
 
@@ -1057,7 +1082,7 @@ describe CalendarEventsApiController, type: :request do
           api_call(:put, "/api/v1/calendar_events/#{@event.id}",
                           {:controller => 'calendar_events_api', :action => 'update', :id => @event.to_param, :format => 'json'},
                           {:calendar_event => {:context_code => @course.asset_string}})
-          expect(response).to be_success
+          expect(response).to be_successful
         end
       end
 
@@ -1121,7 +1146,7 @@ describe CalendarEventsApiController, type: :request do
         json = api_call(:get, "/api/v1/courses/#{@course.id}",
                         :controller => 'courses', :action => 'show', :format => 'json', :id => @course.id.to_s)
         get json['calendar']['ics']
-        expect(response).to be_success
+        expect(response).to be_successful
         cal = Icalendar.parse(response.body.dup)[0]
         cal.events[0].x_alt_desc
       end
@@ -1131,7 +1156,7 @@ describe CalendarEventsApiController, type: :request do
       allow(HostUrl).to receive(:default_host).and_return('www.example.com')
       assignment_model(description: "secret stuff here")
       get "/feeds/calendars/#{@course.feed_code}.ics"
-      expect(response).to be_success
+      expect(response).to be_successful
       cal = Icalendar.parse(response.body.dup)[0]
       expect(cal.events[0].description).to eq nil
       expect(cal.events[0].x_alt_desc).to eq nil
@@ -1143,7 +1168,7 @@ describe CalendarEventsApiController, type: :request do
       json = api_call(:get, "/api/v1/calendar_events", {
         :controller => 'calendar_events_api', :action => 'index', :format => 'json'
       })
-      expect(response).to be_success
+      expect(response).to be_successful
     end
 
     context "child_events" do
@@ -1224,7 +1249,7 @@ describe CalendarEventsApiController, type: :request do
         child_event_id = event.child_event_ids.first
         json = api_call(:get, "/api/v1/calendar_events/#{child_event_id}",
                         {:controller => 'calendar_events_api', :action => 'show', :id => child_event_id.to_s, :format => 'json'})
-        expect(response).to be_success
+        expect(response).to be_successful
       end
     end
   end
@@ -2136,7 +2161,7 @@ describe CalendarEventsApiController, type: :request do
         enrollment_state: 'active',
         associated_user_id: @student.id
       )
-      @observer.user_observees.create do |uo|
+      @observer.as_observer_observation_links.create do |uo|
         uo.user_id = @student.id
       end
       @contexts = [@course.asset_string]
@@ -2198,7 +2223,7 @@ describe CalendarEventsApiController, type: :request do
     it "should have events for the teacher" do
       raw_api_call(:get, "/feeds/calendars/#{@teacher.feed_code}.ics", {
         :controller => 'calendar_events_api', :action => 'public_feed', :format => 'ics', :feed_code => @teacher.feed_code})
-      expect(response).to be_success
+      expect(response).to be_successful
 
       expect(response.body.scan(/UID:\s*event-([^\n]*)/).flatten.map(&:strip)).to match_array [
                                                                                          "assignment-override-#{@override.id}", "calendar-event-#{@event.id}",
@@ -2208,7 +2233,7 @@ describe CalendarEventsApiController, type: :request do
     it "should have events for the student" do
       raw_api_call(:get, "/feeds/calendars/#{@student.feed_code}.ics", {
         :controller => 'calendar_events_api', :action => 'public_feed', :format => 'ics', :feed_code => @student.feed_code})
-      expect(response).to be_success
+      expect(response).to be_successful
 
       expect(response.body.scan(/UID:\s*event-([^\n]*)/).flatten.map(&:strip)).to match_array [
                                                                                          "assignment-override-#{@override.id}", "calendar-event-#{@event.id}", "calendar-event-#{@appointment.id}"]
@@ -2216,6 +2241,22 @@ describe CalendarEventsApiController, type: :request do
       # make sure the assignment actually has the override date
       expected_override_date_output = @override.due_at.utc.iso8601.gsub(/[-:]/, '').gsub(/\d\dZ$/, '00Z')
       expect(response.body.match(/DTSTART:\s*#{expected_override_date_output}/)).not_to be_nil
+    end
+
+    it "should include the appointment details in the teachers export" do
+      get "/feeds/calendars/#{@teacher.feed_code}.ics"
+      expect(response).to be_successful
+      cal = Icalendar.parse(response.body.dup)[0]
+      appointment_text = "Unnamed Course\n" + "\n" + "Participants: \n" + "User\n" + "\n"
+      expect(cal.events[1].description).to eq appointment_text
+      expect(cal.events[2].description).to eq appointment_text
+    end
+
+    it "should not expose details of other students appts to a student" do
+      get "/feeds/calendars/#{@user.feed_code}.ics"
+      expect(response).to be_successful
+      cal = Icalendar.parse(response.body.dup)[0]
+      expect(cal.events[1].description).to eq nil
     end
 
     it "should render unauthorized feed for bad code" do

@@ -66,6 +66,24 @@ describe "Importing assignments" do
     expect(a.points_possible).to eq rubric.points_possible
   end
 
+  it "should import association settings when rubric is included" do
+    file_data = get_import_data('', 'assignment')
+    context = get_import_context('')
+    migration = context.content_migrations.create!
+
+    assignment_hash = file_data.find{|h| h['migration_id'] == '4469882339231'}.with_indifferent_access
+    rubric_model({context: context, migration_id: assignment_hash[:grading][:rubric_id]})
+    assignment_hash[:rubric_use_for_grading] = true
+    assignment_hash[:rubric_hide_points] = true
+    assignment_hash[:rubric_hide_outcome_results] = true
+
+    Importers::AssignmentImporter.import_from_migration(assignment_hash, context, migration)
+    ra = Assignment.where(migration_id: assignment_hash[:migration_id]).first.rubric_association
+    expect(ra.use_for_grading).to be true
+    expect(ra.hide_points).to be true
+    expect(ra.hide_outcome_results).to be true
+  end
+
   it "should import group category into existing group with same name when marked as a group assignment" do
     file_data = get_import_data('', 'assignment')
     context = get_import_context('')
@@ -347,13 +365,39 @@ describe "Importing assignments" do
       }
     end
 
-    it "creates a assignment_configuration_tool_lookup" do
-      course_model
-      migration = @course.content_migrations.create!
-      assignment = @course.assignments.create! :title => "test", :due_at => Time.now, :unlock_at => 1.day.ago, :lock_at => 1.day.from_now, :peer_reviews_due_at => 2.days.from_now, :migration_id => migration_id
-      Importers::AssignmentImporter.import_from_migration(assign_hash, @course, migration)
-      assignment.reload
-      expect(assignment.assignment_configuration_tool_lookups).to exist
+    context 'when plagiarism detection tools are being imported' do
+      let(:course) { course_model }
+      let(:migration) { course.content_migrations.create! }
+      let(:assignment) do
+        course.assignments.create!(
+          title: "test",
+          due_at: Time.zone.now,
+          unlock_at: 1.day.ago,
+          lock_at: 1.day.from_now,
+          peer_reviews_due_at: 2.days.from_now,
+          migration_id: migration_id
+        )
+      end
+
+      it "creates a assignment_configuration_tool_lookup" do
+        assignment
+        Importers::AssignmentImporter.import_from_migration(assign_hash, course, migration)
+        assignment.reload
+        expect(assignment.assignment_configuration_tool_lookups).to exist
+      end
+
+      it "does not create duplicate assignment_configuration_tool_lookups" do
+        assignment.assignment_configuration_tool_lookups.create!(
+          tool_vendor_code: vendor_code,
+          tool_product_code: product_code,
+          tool_resource_type_code: resource_type_code,
+          tool_type: 'Lti::MessageHandler'
+        )
+
+        Importers::AssignmentImporter.import_from_migration(assign_hash, @course, migration)
+        assignment.reload
+        expect(assignment.assignment_configuration_tool_lookups.count).to eq 1
+      end
     end
 
     it "sets the vendor/product/resource_type codes" do

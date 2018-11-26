@@ -1,3 +1,21 @@
+#
+# Copyright (C) 2015 - present Instructure, Inc.
+#
+# This file is part of Canvas.
+#
+# Canvas is free software: you can redistribute it and/or modify it under
+# the terms of the GNU Affero General Public License as published by the Free
+# Software Foundation, version 3 of the License.
+#
+# Canvas is distributed in the hope that it will be useful, but WITHOUT ANY
+# WARRANTY; without even the implied warranty of MERCHANTABILITY or FITNESS FOR
+# A PARTICULAR PURPOSE. See the GNU Affero General Public License for more
+# details.
+#
+# You should have received a copy of the GNU Affero General Public License along
+# with this program. If not, see <http://www.gnu.org/licenses/>.
+#
+
 require File.expand_path(File.dirname(__FILE__) + '/../api_spec_helper')
 
 # https://github.com/adlnet/xAPI-Spec/blob/master/xAPI.md
@@ -69,7 +87,7 @@ describe LtiApiController, type: :request do
       previous_time = e.total_activity_time
 
       make_call('body' => xapi_body)
-      expect(response).to be_success
+      expect(response).to be_successful
 
       expect(e.reload.total_activity_time).to eq previous_time + 600
     end
@@ -105,7 +123,7 @@ describe LtiApiController, type: :request do
       body = xapi_body
       body.delete(:result)
       make_call('body' => body)
-      expect(response).to be_success
+      expect(response).to be_successful
     end
   end
 
@@ -147,7 +165,7 @@ describe LtiApiController, type: :request do
       previous_time = e.total_activity_time
 
       make_call('body' => caliper_body, 'path' => "/api/lti/v1/caliper/#{@token}")
-      expect(response).to be_success
+      expect(response).to be_successful
 
       expect(e.reload.total_activity_time).to eq previous_time + 600
     end
@@ -159,7 +177,7 @@ describe LtiApiController, type: :request do
       body['@type'] = 'did_not_view'
 
       make_call('body' => body, 'path' => "/api/lti/v1/caliper/#{@token}")
-      expect(response).to be_success
+      expect(response).to be_successful
 
       expect(e.reload.total_activity_time).to eq previous_time
     end
@@ -195,7 +213,7 @@ describe LtiApiController, type: :request do
       body = caliper_body
       body.delete('duration')
       make_call('body' => body, 'path' => "/api/lti/v1/caliper/#{@token}")
-      expect(response).to be_success
+      expect(response).to be_successful
     end
   end
 

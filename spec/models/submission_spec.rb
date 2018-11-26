@@ -17,10 +17,11 @@
 #
 
 require_relative '../spec_helper'
-require_relative '../sharding_spec_helper'
 require_relative '../lib/validates_as_url'
 
 describe Submission do
+  subject(:submission) { Submission.new }
+
   before(:once) do
     course_with_teacher(active_all: true)
     course_with_student(active_all: true, course: @course)
@@ -42,6 +43,42 @@ describe Submission do
   it { is_expected.to validate_numericality_of(:points_deducted).is_greater_than_or_equal_to(0).allow_nil }
   it { is_expected.to validate_numericality_of(:seconds_late_override).is_greater_than_or_equal_to(0).allow_nil }
   it { is_expected.to validate_inclusion_of(:late_policy_status).in_array(["none", "missing", "late"]).allow_nil }
+
+  describe '#anonymous_id' do
+    subject { submission.anonymous_id }
+
+    let(:student) { @student }
+    let(:assignment) { @assignment }
+
+    it { is_expected.to be_blank }
+
+    it 'sets an anoymous_id on validation' do
+      submission.validate
+      expect(submission.anonymous_id).to be_present
+    end
+
+    it 'does not change if already persisted' do
+      submission = assignment.submissions.find_by!(user: student)
+      expect { submission.save! }.not_to change { submission.anonymous_id }
+    end
+  end
+
+  describe '.anonymous_ids_for' do
+    subject { Submission.anonymous_ids_for(@first_assignment) }
+
+    before do
+      student_with_anonymous_ids = @student
+      student_without_anonymous_ids = student_in_course(course: @course, active_all: true).user
+      @first_assignment = @course.assignments.create!
+      @course.assignments.create! # second_assignment
+      @first_assignment_submission = @first_assignment.submissions.find_by!(user: student_with_anonymous_ids)
+      Submission.where(user: student_without_anonymous_ids).update_all(anonymous_id: nil)
+    end
+
+    it 'only contains submissions with anonymous_ids' do
+      is_expected.to contain_exactly(@first_assignment_submission.anonymous_id)
+    end
+  end
 
   describe "with grading periods" do
     let(:in_closed_grading_period) { 9.days.ago }
@@ -139,6 +176,35 @@ describe Submission do
             @student = user_factory(active_all: true)
             @context.enroll_student(@student)
             expect(@submission.grants_right?(@student, :grade)).to eq(false)
+          end
+        end
+
+        context 'when part of a moderated assignment' do
+          before(:once) do
+            @assignment.update!(
+              moderated_grading: true,
+              grader_count: 2
+            )
+            submission_spec_model(assignment: @assignment)
+          end
+
+          it 'may not be graded if grades are not published' do
+            expect(@submission.grants_right?(@teacher, :grade)).to eq false
+          end
+
+          it 'sets an error message indicating moderation is in progress if grades are not published' do
+            @submission.grants_right?(@teacher, :grade)
+            expect(@submission.grading_error_message).to eq 'This assignment is currently being moderated'
+          end
+
+          it 'may be graded if grades are not published but grade_posting_in_progress is true' do
+            @submission.grade_posting_in_progress = true
+            expect(@submission.grants_right?(@teacher, :grade)).to eq true
+          end
+
+          it 'may be graded when grades for the assignment are published' do
+            @submission.assignment.update!(grades_published_at: Time.zone.now)
+            expect(@submission.grants_right?(@teacher, :grade)).to eq true
           end
         end
       end
@@ -777,11 +843,35 @@ describe Submission do
       end
     end
 
+    it "sets the workflow state to 'graded' when submission is missing" do
+      Timecop.freeze(1.day.from_now(@date)) do
+        submission.score = nil
+        submission.apply_late_policy(@late_policy, @assignment)
+        expect(submission.workflow_state).to eq "graded"
+      end
+    end
+
     it "does not change the score of a missing submission if it already has one" do
       Timecop.freeze(1.day.from_now(@date)) do
         @assignment.grade_student(@student, grade: 1000, grader: @teacher)
         submission.apply_late_policy(@late_policy, @assignment)
         expect(submission.score).to be 1000.0
+      end
+    end
+
+    context "with regraded" do
+      it "does not apply the deduction multiple times if submission saved multiple times" do
+        @late_policy.update!(course_id: @course)
+        Timecop.freeze(@date) do
+          @assignment.submit_homework(@student, body: 'a body')
+          # The submission is saved once in grade_student.  Using sub
+          # here to avoid masking/using the submission in the let
+          # above. I want to make sure I'm using the exact same object
+          # as returned by grade_student.
+          sub = @assignment.grade_student(@student, grade: 1000, grader: @teacher).first
+          sub.save!
+          expect(sub.score).to be 700.0
+        end
       end
     end
 
@@ -907,6 +997,64 @@ describe Submission do
 
       it "applies missing policy if submission is manually marked missing" do
         Timecop.freeze(1.day.from_now(@date)) do
+          submission.score = nil
+          submission.late_policy_status = 'missing'
+          submission.apply_late_policy(@late_policy, @assignment)
+          expect(submission.score).to eq 200
+        end
+      end
+    end
+
+    context 'when submitting to an LTI assignment' do
+      before(:once) do
+        @date = Time.zone.local(2017, 1, 15, 12)
+        @assignment.update!(due_at: @date - 3.hours, points_possible: 1_000, submission_types: 'external_tool')
+        @late_policy = late_policy_factory(course: @course, deduct: 10.0, every: :hour, missing: 80.0)
+      end
+
+      it "deducts a percentage per interval late if submitted late" do
+        Timecop.freeze(@date) do
+          @assignment.submit_homework(@student, body: "a body")
+          @assignment.grade_student(@student, grade: 700, grader: @teacher)
+          expect(submission.points_deducted).to eq 300
+        end
+      end
+
+      it "applies the deduction to the awarded score if submitted late" do
+        Timecop.freeze(@date) do
+          @assignment.submit_homework(@student, body: "a body")
+          @assignment.grade_student(@student, grade: 700, grader: @teacher)
+          expect(submission.score).to eq 400
+        end
+      end
+
+      it "does not grade missing submissions" do
+        Timecop.freeze(@date) do
+          submission.apply_late_policy
+          expect(submission.score).to be_nil
+        end
+      end
+
+      it "deducts a percentage per interval late if the submission is manually marked late" do
+        @assignment.submit_homework(@student, body: "a body")
+        submission.late_policy_status = 'late'
+        submission.seconds_late_override = 4.hours
+        submission.score = 700
+        submission.apply_late_policy(@late_policy, @assignment)
+        expect(submission.points_deducted).to eq 400
+      end
+
+      it "applies the deduction to the awarded score if the submission is manually marked late" do
+        @assignment.submit_homework(@student, body: "a body")
+        submission.late_policy_status = 'late'
+        submission.seconds_late_override = 4.hours
+        submission.score = 700
+        submission.apply_late_policy(@late_policy, @assignment)
+        expect(submission.score).to eq 300
+      end
+
+      it "applies the missing policy if the submission is manually marked missing" do
+        Timecop.freeze(@date + 1.day) do
           submission.score = nil
           submission.late_policy_status = 'missing'
           submission.apply_late_policy(@late_policy, @assignment)
@@ -1816,6 +1964,24 @@ describe Submission do
         })
       end
 
+      it "prioritizes recent originality report if multiple exist for an attachment" do
+        AttachmentAssociation.create!(context: submission, attachment_id: attachment)
+        submission.update_attributes(attachment_ids: attachment.id.to_s)
+        first_report = OriginalityReport.create!(
+          attachment: attachment,
+          submission: submission,
+          workflow_state: 'pending'
+        )
+        second_report = OriginalityReport.create!(
+          attachment: attachment,
+          submission: submission,
+          originality_score: 50
+        )
+
+        report_data = submission.originality_data[attachment.asset_string]
+        expect(report_data[:similarity_score]).to eq second_report.originality_score
+      end
+
       it "includes tii data" do
         tii_data = {
           similarity_score: 10,
@@ -1872,21 +2038,6 @@ describe Submission do
         }
         submission.turnitin_data[attachment.asset_string] = tii_data
         expect(submission.originality_data).not_to include :vericite
-      end
-
-      it "finds originality data for group assignment submissions" do
-        submission.update_attributes!(attachment_ids: attachment.id.to_s)
-        originality_report
-        submission_two = submission.dup
-        submission_two.update_attributes!(user: User.create!(name: 'second student'))
-        expect(submission_two.originality_data).to eq({
-          attachment.asset_string => {
-            similarity_score: originality_report.originality_score,
-            state: originality_report.state,
-            report_url: originality_report.originality_report_url,
-            status: originality_report.workflow_state
-          }
-        })
       end
 
       it "finds originality data text entry submissions" do
@@ -1965,88 +2116,24 @@ describe Submission do
         group.update_attributes!(users: [user_two, test_student])
 
         submission = assignment.submit_homework(test_student, submission_type: 'online_upload', attachments: [attachment])
+        submission_two = assignment.submit_homework(user_two, submission_type: 'online_upload', attachments: [attachment])
+
+        submission.update!(group: group)
+        submission_two.update!(group: group)
 
         assignment.submissions.each do |s|
           s.update_attributes!(group: group, turnitin_data: {blah: 1})
         end
 
-        OriginalityReport.create!(originality_score: '1', submission: submission, attachment: attachment)
+        report = OriginalityReport.create!(originality_score: '1', submission: submission, attachment: attachment)
+        report.copy_to_group_submissions!
 
-        expect(assignment.submissions.map(&:has_originality_report?).uniq).to match_array [true]
+        expect(assignment.submissions.map(&:has_originality_report?)).to match_array [true, true]
       end
 
       it 'returns false when no reports are present' do
         submission = assignment.submit_homework(test_student, attachments: [attachment])
         expect(submission.has_originality_report?). to eq false
-      end
-    end
-
-    describe '#assignment_group_originality_reports' do
-      let(:test_course) do
-        test_course = course_model
-        test_course.enroll_teacher(test_teacher, enrollment_state: 'active')
-        test_course.enroll_student(test_student, enrollment_state: 'active')
-        test_course
-      end
-      let(:test_teacher) { User.create }
-      let(:test_student) { User.create }
-      let(:assignment) { Assignment.create!(title: 'test assignment', context: test_course) }
-      let(:attachment) { attachment_model(filename: "submission.doc", context: test_student) }
-      let(:report_url) { 'http://www.test-score.com' }
-
-      before do
-        user_two = test_student.dup
-        user_two.update_attributes!(lti_context_id: SecureRandom.uuid)
-        assignment.course.enroll_student(user_two)
-
-        group = group_model(context: assignment.course)
-        group.update_attributes!(users: [user_two, test_student])
-
-        @submission = assignment.submit_homework(
-          test_student,
-          submission_type: 'online_upload',
-          attachments: [attachment]
-        )
-
-        assignment.submissions.each do |s|
-          s.update_attributes!(group: group, turnitin_data: {blah: 1})
-        end
-      end
-
-      it 'returns originality reports from the same submission group' do
-        report = OriginalityReport.create!(originality_score: '1', submission: @submission, attachment: attachment)
-        expect(Submission.last.assignment_group_originality_reports).to match_array [report]
-      end
-
-      it 'does not return reports from another group' do
-        user_three = test_student.dup
-        user_four = test_student.dup
-
-        user_three.update_attributes!(lti_context_id: SecureRandom.uuid)
-        user_four.update_attributes!(lti_context_id: SecureRandom.uuid)
-
-        assignment.course.enroll_student(user_three)
-        assignment.course.enroll_student(user_four)
-
-        group = group_model(context: assignment.course)
-        group.update_attributes!(users: [user_three, user_four])
-
-        second_submission = assignment.submit_homework(
-          user_four,
-          submission_type: 'online_upload',
-          attachments: [attachment]
-        )
-
-        assignment.submissions.each do |s|
-          s.update_attributes!(group: group, turnitin_data: {blah: 1})
-        end
-
-        expect(second_submission.reload.assignment_group_originality_reports).to match_array []
-      end
-
-      it 'includes self originality reports' do
-        report = OriginalityReport.create!(originality_score: '1', submission: @submission, attachment: attachment)
-        expect(@submission.reload.assignment_group_originality_reports).to match_array [report]
       end
     end
 
@@ -2097,23 +2184,24 @@ describe Submission do
 
       it 'treats attachments in submission history as valid' do
         submission = nil
-        attachments = [attachment]
+        first_attachment = attachment
         Timecop.freeze(10.second.ago) do
           submission = assignment.submit_homework(test_student, submission_type: 'online_upload',
-                                     attachments: [attachments[0]])
+                                     attachments: [first_attachment])
         end
 
-        attachments << attachment_model(filename: "submission-b.doc", :context => test_student)
+        attachment = attachment_model(filename: "submission-b.doc", :context => test_student)
         Timecop.freeze(5.second.ago) do
-          submission = assignment.submit_homework test_student, attachments: [attachments[1]]
+          submission = assignment.submit_homework test_student, attachments: [attachment]
         end
 
-        attachments << attachment_model(filename: "submission-c.doc", :context => test_student)
+        attachment = attachment_model(filename: "submission-c.doc", :context => test_student)
         Timecop.freeze(1.second.ago) do
-          submission = assignment.submit_homework test_student, attachments: [attachments[2]]
+          submission = assignment.submit_homework test_student, attachments: [attachment]
         end
 
-        expect(submission.originality_report_url(attachments.first.asset_string, test_teacher)).to eq(report_url)
+        first_history = submission.submission_history.first
+        expect(first_history.originality_report_url(first_attachment.asset_string, test_teacher)).to eq(report_url)
       end
     end
   end
@@ -2728,6 +2816,24 @@ describe Submission do
       @submission.submitted_at = 1.day.ago
       @submission.cached_due_date = 2.days.ago
       expect(@submission).to be_late
+    end
+  end
+
+  describe 'scope: anonymized' do
+    subject(:submissions) { assignment.all_submissions.anonymized }
+
+    let(:assignment) { @course.assignments.create! }
+    let(:first_student) { @student }
+    let(:second_student) { student_in_course(course: @course, active_all: true).user }
+    let(:submission_with_anonymous_id) { submission_model(assignment: assignment, user: first_student) }
+    let(:submission_without_anonymous_id) do
+      submission_model(assignment: assignment, user: second_student).tap do |submission|
+        submission.update_attribute(:anonymous_id, nil)
+      end
+    end
+
+    it 'only contains submissions that have anonymous_ids' do
+      is_expected.to contain_exactly(submission_with_anonymous_id)
     end
   end
 
@@ -3457,22 +3563,6 @@ describe Submission do
     end
   end
 
-  describe "cross-shard attachments" do
-    specs_require_sharding
-    it "should work" do
-      @shard1.activate do
-        @student = user_factory(active_user: true)
-        @attachment = Attachment.create! uploaded_data: StringIO.new('blah'), context: @student, filename: 'blah.txt'
-      end
-      course_factory(active_all: true)
-      @course.enroll_user(@student, "StudentEnrollment").accept!
-      @assignment = @course.assignments.create!
-
-      sub = @assignment.submit_homework(@user, attachments: [@attachment])
-      expect(sub.attachments).to eq [@attachment]
-    end
-  end
-
   describe '.process_bulk_update' do
     before(:once) do
       course_with_teacher active_all: true
@@ -3540,9 +3630,11 @@ describe Submission do
 
   describe 'find_or_create_provisional_grade!' do
     before(:once) do
-      submission_spec_model
+      @assignment.grader_count = 1
       @assignment.moderated_grading = true
+      @assignment.final_grader = @teacher
       @assignment.save!
+      submission_spec_model
 
       @teacher2 = User.create(name: "some teacher 2")
       @context.enroll_teacher(@teacher2)
@@ -3605,15 +3697,17 @@ describe Submission do
       expect(@submission.provisional_grades.first.graded_anonymously).to eql true
     end
 
-    it "raises an exception if final is true and user is not allowed to moderate grades" do
+    it "raises an exception if final is true and user is not allowed to select final grade" do
       expect{ @submission.find_or_create_provisional_grade!(@student, final: true) }
         .to raise_error(Assignment::GradeError, "User not authorized to give final provisional grades")
     end
 
     it "raises an exception if grade is not final and student does not need a provisional grade" do
-      @submission.find_or_create_provisional_grade!(@teacher)
+      @assignment.grade_student(@student, grade: 2, grader: @teacher2, provisional: true)
+      third_teacher = User.create!
+      @course.enroll_teacher(third_teacher, enrollment_state: :active)
 
-      expect{ @submission.find_or_create_provisional_grade!(@teacher2, final: false) }
+      expect{ @submission.find_or_create_provisional_grade!(third_teacher, final: false) }
         .to raise_error(Assignment::GradeError, "Student already has the maximum number of provisional grades")
     end
 
@@ -3626,82 +3720,537 @@ describe Submission do
 
   describe 'moderated_grading_whitelist' do
     before(:once) do
-      submission_spec_model
+      @student = @user
+      @assignment.update!(
+        final_grader: @teacher,
+        grader_comments_visible_to_graders: false,
+        grader_count: 3,
+        moderated_grading: true,
+        submission_types: :online_text_entry
+      )
+      @assignment.submit_homework(@student, body: 'my submission', submission_type: :online_text_entry)
+      @submission = @assignment.submissions.find_by(user: @student)
     end
 
-    context "not moderated" do
-      it "returns nil" do
-        expect(@submission.moderated_grading_whitelist).to be_nil
-      end
+    let(:user_ids_in_whitelist) { whitelist.map { |user| user.fetch(:global_id)&.to_i } }
+
+    it 'returns nil when the assignment is not moderated' do
+      # Skipping validations here because they'd prevent turning off Moderated Grading
+      # for an assignment with graded submissions.
+      @assignment.update_column(:moderated_grading, false)
+      expect(@submission.moderated_grading_whitelist).to be_nil
     end
 
-    context "moderated" do
-      before(:once) do
-        @assignment.moderated_grading = true
-        @assignment.save!
-        @submission.reload
-        @pg = @submission.find_or_create_provisional_grade!(@teacher, score: 1)
+    it 'returns nil when the user is not present' do
+      expect(@submission.moderated_grading_whitelist(nil)).to be_nil
+    end
+
+    it 'can be passed a collection of attachments for checking if crocodoc is available' do
+      attachment = double
+      expect(attachment).to receive(:crocodoc_available?).and_return(true)
+      @submission.moderated_grading_whitelist(loaded_attachments: [attachment])
+    end
+
+    it 'returns a collection of moderated grading ids' do
+      moderated_grading_ids = @student.moderated_grading_ids(false)
+      expect(@submission.moderated_grading_whitelist.first).to eq moderated_grading_ids
+    end
+
+    it 'calls moderation_whitelist_for_user to generate the whitelist' do
+      expect(@submission).to receive(:moderation_whitelist_for_user).with(@student).once.and_call_original
+      @submission.moderated_grading_whitelist
+    end
+  end
+
+  describe 'moderation_whitelist_for_user' do
+    before(:once) do
+      @student = @user
+      @provisional_grader = User.create!
+      @other_provisional_grader = User.create!
+      @course.enroll_teacher(@provisional_grader, enrollment_state: :active)
+      @course.enroll_teacher(@other_provisional_grader, enrollment_state: :active)
+      @eligible_provisional_grader = User.create!
+      @course.enroll_teacher(@eligible_provisional_grader, enrollment_state: :active)
+      @admin = account_admin_user(account: @course.root_account)
+      @assignment.update!(
+        final_grader: @teacher,
+        grader_comments_visible_to_graders: false,
+        grader_count: 3,
+        moderated_grading: true,
+        submission_types: :online_text_entry
+      )
+      @assignment.submit_homework(@student, body: 'my submission', submission_type: :online_text_entry)
+      @submission = @assignment.submissions.find_by(user: @student)
+      @assignment.grade_student(@student, grader: @teacher, provisional: true, score: 5)
+      @assignment.grade_student(@student, grader: @provisional_grader, provisional: true, score: 1)
+      @assignment.grade_student(@student, grader: @other_provisional_grader, provisional: true, score: 3)
+    end
+
+    let(:user_ids_in_whitelist) { whitelist.map { |user| user.fetch(:global_id)&.to_i } }
+
+    it 'returns an empty array when the assignment is not moderated' do
+      # Skipping validations here because they'd prevent turning off Moderated Grading
+      # for an assignment with graded submissions.
+      @assignment.update_column(:moderated_grading, false)
+      expect(@submission.moderation_whitelist_for_user(@teacher)).to be_empty
+    end
+
+    it 'returns an empty array when the user is not present' do
+      expect(@submission.moderation_whitelist_for_user(nil)).to be_empty
+    end
+
+    it 'returns an empty array when the user is not permitted to view annotations for the submission' do
+      other_student = User.create!
+      @course.enroll_student(other_student, enrollment_state: :active)
+      expect(@submission.moderation_whitelist_for_user(other_student)).to be_empty
+    end
+
+    context 'when grades are not published' do
+      context 'when the user is the final grader' do
+        let(:whitelist) { @submission.moderation_whitelist_for_user(@teacher) }
+
+        it 'includes the current user' do
+          expect(whitelist).to include @teacher
+        end
+
+        it 'includes all provisional graders' do
+          expect(whitelist).to include(*@assignment.moderation_grader_users)
+        end
+
+        it 'includes the student' do
+          expect(whitelist).to include @student
+        end
+
+        it 'does not include eligible provisional graders' do
+          expect(whitelist).not_to include @eligible_provisional_grader
+        end
+
+        it 'does not include duplicates' do
+          expect(whitelist.uniq).to eq whitelist
+        end
+
+        it 'does not include nil values' do
+          expect(whitelist).not_to include nil
+        end
       end
 
-      context "grades not published" do
-        context "student not in moderation set" do
-          it "returns the student alone" do
-            expect(@submission.moderated_grading_whitelist).to eq([@student.moderated_grading_ids])
-          end
-        end
+      context 'when the user is a provisional grader' do
+        let(:whitelist) { @submission.moderation_whitelist_for_user(@provisional_grader) }
 
-        context "student in moderation set" do
-          it "returns the student alone" do
-            @assignment.moderated_grading_selections.create!(student: @student)
-            expect(@submission.moderated_grading_whitelist).to eq([@student.moderated_grading_ids])
-          end
-        end
-      end
-
-      context "grades published" do
-        before(:once) do
-          @assignment.grades_published_at = 1.hour.ago
-          @assignment.save!
-          @submission.reload
-        end
-
-        context "student not in moderation set" do
-          it "returns nil" do
-            expect(@submission.moderated_grading_whitelist).to be_nil
-          end
-        end
-
-        context "student in moderation set" do
+        context 'when grader comments are visible to other graders' do
           before(:once) do
-            @sel = @assignment.moderated_grading_selections.create!(student: @student)
+            @assignment.update!(grader_comments_visible_to_graders: true)
           end
 
-          it "returns nil if no provisional grade was published" do
-            expect(@submission.moderated_grading_whitelist).to be_nil
+          it 'includes all provisional graders' do
+            expect(whitelist).to include(*@assignment.moderation_grader_users)
           end
 
-          it "returns the student's and selected provisional grader's ids" do
-            @sel.provisional_grade = @pg
-            @sel.save!
-            expect(@submission.moderated_grading_whitelist).to match_array([
-              @student.moderated_grading_ids,
-              @teacher.moderated_grading_ids
-            ])
+          it 'includes the final grader' do
+            expect(whitelist).to include @teacher
           end
 
-          it "returns the student's, provisional grader's, and moderator's ids for a copied mark" do
-            moderator = @course.enroll_teacher(user_model, :enrollment_state => 'active').user
-            final = @pg.copy_to_final_mark!(moderator)
-            @sel.provisional_grade = final
-            @sel.save!
-            expect(@submission.moderated_grading_whitelist).to match_array([
-              @student.moderated_grading_ids,
-              @teacher.moderated_grading_ids,
-              moderator.moderated_grading_ids
-            ])
+          it 'includes the student' do
+            expect(whitelist).to include @student
+          end
+
+          it 'does not include eligible provisional graders' do
+            expect(whitelist).not_to include @eligible_provisional_grader
+          end
+
+          it 'does not include duplicates' do
+            expect(whitelist.uniq).to eq whitelist
+          end
+
+          it 'does not include nil values' do
+            expect(whitelist).not_to include nil
+          end
+        end
+
+        context 'when grader comments are not visible to other graders' do
+          it 'includes the current user' do
+            expect(whitelist).to include @provisional_grader
+          end
+
+          it 'does not include other provisional graders' do
+            expect(whitelist).not_to include @other_provisional_grader
+          end
+
+          it 'does not include the final grader' do
+            expect(whitelist).not_to include @teacher
+          end
+
+          it 'includes the student' do
+            expect(whitelist).to include @student
+          end
+
+          it 'does not include eligible provisional graders' do
+            expect(whitelist).not_to include @eligible_provisional_grader
+          end
+
+          it 'does not include duplicates' do
+            expect(whitelist.uniq).to eq whitelist
+          end
+
+          it 'does not include nil values' do
+            expect(whitelist).not_to include nil
           end
         end
       end
+
+      context 'when the user is an eligible provisional grader' do
+        let(:whitelist) { @submission.moderation_whitelist_for_user(@eligible_provisional_grader) }
+
+        context 'when grader comments are visible to other graders' do
+          before(:once) do
+            @assignment.update!(grader_comments_visible_to_graders: true)
+          end
+
+          it 'includes the current user' do
+            expect(whitelist).to include @eligible_provisional_grader
+          end
+
+          it 'includes all provisional graders' do
+            expect(whitelist).to include(*@assignment.moderation_grader_users)
+          end
+
+          it 'includes the final grader' do
+            expect(whitelist).to include @teacher
+          end
+
+          it 'includes the student' do
+            expect(whitelist).to include @student
+          end
+
+          it 'does not include other eligible provisional graders' do
+            other_eligible_provisional_grader = User.create!
+            @course.enroll_teacher(other_eligible_provisional_grader, enrollment_state: :active)
+            expect(whitelist).not_to include other_eligible_provisional_grader
+          end
+
+          it 'does not include duplicates' do
+            expect(whitelist.uniq).to eq whitelist
+          end
+
+          it 'does not include nil values' do
+            expect(whitelist).not_to include nil
+          end
+        end
+
+        context 'when grader comments are not visible to other graders' do
+          it 'includes the current user' do
+            expect(whitelist).to include @eligible_provisional_grader
+          end
+
+          it 'does not include provisional graders' do
+            expect(whitelist).not_to include(*@assignment.moderation_grader_users)
+          end
+
+          it 'does not include the final grader' do
+            expect(whitelist).not_to include @teacher
+          end
+
+          it 'includes the student' do
+            expect(whitelist).to include @student
+          end
+
+          it 'does not include other eligible provisional graders' do
+            other_eligible_provisional_grader = User.create!
+            @course.enroll_teacher(other_eligible_provisional_grader, enrollment_state: :active)
+            expect(whitelist).not_to include other_eligible_provisional_grader
+          end
+
+          it 'does not include duplicates' do
+            expect(whitelist.uniq).to eq whitelist
+          end
+
+          it 'does not include nil values' do
+            expect(whitelist).not_to include nil
+          end
+        end
+      end
+
+      context 'when the user is an admin' do
+        let(:whitelist) { @submission.moderation_whitelist_for_user(@admin) }
+
+        it 'includes the current user' do
+          expect(whitelist).to include @admin
+        end
+
+        it 'includes all provisional graders' do
+          expect(whitelist).to include(*@assignment.moderation_grader_users)
+        end
+
+        it 'includes the final grader' do
+          expect(whitelist).to include @teacher
+        end
+
+        it 'includes the student' do
+          expect(whitelist).to include @student
+        end
+
+        it 'does not include eligible provisional graders' do
+          expect(whitelist).not_to include @eligible_provisional_grader
+        end
+
+        it 'does not include duplicates' do
+          expect(whitelist.uniq).to eq whitelist
+        end
+
+        it 'does not include nil values' do
+          expect(whitelist).not_to include nil
+        end
+      end
+
+      context 'when the user is a student' do
+        let(:whitelist) { @submission.moderation_whitelist_for_user(@student) }
+
+        it 'includes the current user' do
+          expect(whitelist).to include @student
+        end
+
+        it 'does not include the admin' do
+          expect(whitelist).not_to include @admin
+        end
+
+        it 'does not include provisional graders' do
+          expect(whitelist).not_to include(*@assignment.moderation_grader_users)
+        end
+
+        it 'does not include eligible provisional graders' do
+          expect(whitelist).not_to include @eligible_provisional_grader
+        end
+
+        it 'does not include duplicates' do
+          expect(whitelist.uniq).to eq whitelist
+        end
+
+        it 'does not include nil values' do
+          expect(whitelist).not_to include nil
+        end
+      end
+    end
+
+    context 'when grades are published' do
+      before(:once) do
+        provisional_grade = @submission.find_or_create_provisional_grade!(@provisional_grader)
+        selection = @assignment.moderated_grading_selections.find_by(student: @student)
+        selection.update!(provisional_grade: provisional_grade)
+        provisional_grade.publish!
+        @assignment.update!(grades_published_at: 1.hour.ago)
+        @submission.reload
+      end
+
+      context 'when the user is the final grader' do
+        let(:whitelist) { @submission.moderation_whitelist_for_user(@teacher) }
+
+        it 'includes the current user' do
+          expect(whitelist).to include @teacher
+        end
+
+        it 'includes the provisional grader whose grade was selected' do
+          expect(whitelist).to include @provisional_grader
+        end
+
+        it 'does not include the provisional grader whose grade was not selected' do
+          expect(whitelist).not_to include @other_provisional_grader
+        end
+
+        it 'includes the student' do
+          expect(whitelist).to include @student
+        end
+
+        it 'does not include eligible provisional graders' do
+          expect(whitelist).not_to include @eligible_provisional_grader
+        end
+
+        it 'does not include duplicates' do
+          expect(whitelist.uniq).to eq whitelist
+        end
+
+        it 'does not include nil values' do
+          expect(whitelist).not_to include nil
+        end
+
+        it 'does not raise an error when the submission has no grader' do
+          @submission.update!(grader: nil, score: nil)
+          expect { whitelist }.not_to raise_error
+        end
+      end
+
+      context 'when the user is a provisional grader' do
+        let(:whitelist) { @submission.moderation_whitelist_for_user(@provisional_grader) }
+
+        it 'includes the current user' do
+          expect(whitelist).to include @provisional_grader
+        end
+
+        it 'does not include other provisional graders whose grades were not selected' do
+          expect(whitelist).not_to include @other_provisional_grader
+        end
+
+        it 'does not include the final grader if their grade was not selected' do
+          expect(whitelist).not_to include @teacher
+        end
+
+        it 'includes the student' do
+          expect(whitelist).to include @student
+        end
+
+        it 'does not include eligible provisional graders' do
+          expect(whitelist).not_to include @eligible_provisional_grader
+        end
+
+        it 'does not include duplicates' do
+          expect(whitelist.uniq).to eq whitelist
+        end
+
+        it 'does not include nil values' do
+          expect(whitelist).not_to include nil
+        end
+
+        it 'does not raise an error when the submission has no grader' do
+          @submission.update!(grader: nil, score: nil)
+          expect { whitelist }.not_to raise_error
+        end
+      end
+
+      context 'when the user is an eligible provisional grader' do
+        let(:whitelist) { @submission.moderation_whitelist_for_user(@eligible_provisional_grader) }
+
+        it 'includes the current user' do
+          expect(whitelist).to include @eligible_provisional_grader
+        end
+
+        it 'includes the provisional grader whose grade was selected' do
+          expect(whitelist).to include @provisional_grader
+        end
+
+        it 'does not include the provisional grader whose grade was not selected' do
+          expect(whitelist).not_to include @other_provisional_grader
+        end
+
+        it 'does not include the final grader if their grade was not selected' do
+          expect(whitelist).not_to include @teacher
+        end
+
+        it 'includes the student' do
+          expect(whitelist).to include @student
+        end
+
+        it 'does not include other eligible provisional graders' do
+          other_eligible_provisional_grader = User.create!
+          @course.enroll_teacher(other_eligible_provisional_grader, enrollment_state: :active)
+          expect(whitelist).not_to include other_eligible_provisional_grader
+        end
+
+        it 'does not include duplicates' do
+          expect(whitelist.uniq).to eq whitelist
+        end
+
+        it 'does not include nil values' do
+          expect(whitelist).not_to include nil
+        end
+
+        it 'does not raise an error when the submission has no grader' do
+          @submission.update!(grader: nil, score: nil)
+          expect { whitelist }.not_to raise_error
+        end
+      end
+
+      context 'when the user is an admin' do
+        let(:whitelist) { @submission.moderation_whitelist_for_user(@admin) }
+
+        it 'includes the current user' do
+          expect(whitelist).to include @admin
+        end
+
+        it 'includes the provisional grader whose grade was selected' do
+          expect(whitelist).to include @provisional_grader
+        end
+
+        it 'does not include the provisional grader whose grade was not selected' do
+          expect(whitelist).not_to include @other_provisional_grader
+        end
+
+        it 'does not include the final grader if their grade was not selected' do
+          expect(whitelist).not_to include @teacher
+        end
+
+        it 'includes the student' do
+          expect(whitelist).to include @student
+        end
+
+        it 'does not include eligible provisional graders' do
+          expect(whitelist).not_to include @eligible_provisional_grader
+        end
+
+        it 'does not include duplicates' do
+          expect(whitelist.uniq).to eq whitelist
+        end
+
+        it 'does not include nil values' do
+          expect(whitelist).not_to include nil
+        end
+
+        it 'does not raise an error when the submission has no grader' do
+          @submission.update!(grader: nil, score: nil)
+          expect { whitelist }.not_to raise_error
+        end
+      end
+
+      context 'when the user is a student' do
+        let(:whitelist) { @submission.moderation_whitelist_for_user(@student) }
+
+        it 'includes the current user' do
+          expect(whitelist).to include @student
+        end
+
+        it 'includes the provisional grader whose grade was selected' do
+          expect(whitelist).to include @provisional_grader
+        end
+
+        it 'does not include the provisional grader whose grade was not selected' do
+          expect(whitelist).not_to include @other_provisional_grader
+        end
+
+        it 'does not include the final grader if their grade was not selected' do
+          expect(whitelist).not_to include @teacher
+        end
+
+        it 'does not include eligible provisional graders' do
+          expect(whitelist).not_to include @eligible_provisional_grader
+        end
+
+        it 'does not include duplicates' do
+          expect(whitelist.uniq).to eq whitelist
+        end
+
+        it 'does not include nil values' do
+          expect(whitelist).not_to include nil
+        end
+
+        it 'does not raise an error when the submission has no grader' do
+          @submission.update!(grader: nil, score: nil)
+          expect { whitelist }.not_to raise_error
+        end
+      end
+    end
+  end
+
+  describe 'anonymous_identities' do
+    let(:submission) { @assignment.submissions.first }
+
+    it 'includes the student in the list' do
+      expect(submission.anonymous_identities).to have_key @student.id
+    end
+
+    it 'includes the anonymous name' do
+      expect(submission.anonymous_identities.dig(@student.id, :name)).to eq 'Student'
+    end
+
+    it 'includes the anonymous id' do
+      expect(submission.anonymous_identities.dig(@student.id, :id)).to eq submission.anonymous_id
     end
   end
 
@@ -3748,6 +4297,26 @@ describe Submission do
         expect(subject).to include(@teacher_assessment)
       end
 
+      it 'does not return rubric assessments if assignment has no rubric' do
+        @assignment.rubric_association.destroy!
+
+        expect(subject).not_to include(@teacher_assessment)
+      end
+
+      it 'only returns rubric assessments from associated rubrics' do
+        other = @rubric_association.dup
+        other.save!
+        other_assessment = other.rubric_assessments.create!({
+          artifact: @submission,
+          assessment_type: 'grading',
+          assessor: @teacher,
+          rubric: @rubric,
+          user: @assessed_user
+        })
+
+        expect(subject).to eq([other_assessment])
+      end
+
       it 'returns only student rubric assessment' do
         @viewing_user = @student
         expect(subject).not_to include(@teacher_assessment)
@@ -3777,6 +4346,12 @@ describe Submission do
       comment = @submission.add_comment(author: @teacher, comment: '42', draft_comment: false)
 
       expect(comment).not_to be_draft
+    end
+
+    it 'creates a comment without an author when skip_author option is true' do
+      comment = @submission.add_comment(comment: '42', skip_author: true)
+
+      expect(comment.author).to be_nil
     end
   end
 
@@ -3950,6 +4525,7 @@ describe Submission do
     end
 
     context "sharding" do
+      require_relative '../sharding_spec_helper'
       specs_require_sharding
 
       it "serializes relative to current scope's shard" do
@@ -3957,12 +4533,92 @@ describe Submission do
           expect(Submission.shard(Shard.default).needs_grading.count).to eq(1)
         end
       end
+
+      it "works with cross shard attachments" do
+        @shard1.activate do
+          @student = user_factory(active_user: true)
+          @attachment = Attachment.create! uploaded_data: StringIO.new('blah'), context: @student, filename: 'blah.txt'
+        end
+        course_factory(active_all: true)
+        @course.enroll_user(@student, "StudentEnrollment").accept!
+        @assignment = @course.assignments.create!
+
+        sub = @assignment.submit_homework(@user, attachments: [@attachment])
+        expect(sub.attachments).to eq [@attachment]
+      end
+    end
+  end
+
+  describe "#can_view_details?" do
+    before :each do
+      @assignment.update!(anonymous_grading: true)
+      @submission = @assignment.submit_homework(@student, submission_type: 'online_text_entry', body: 'a body')
+    end
+
+    context 'when the assignment is muted' do
+      it "returns false if user isn't present" do
+        expect(@submission).not_to be_can_view_details(nil)
+      end
+
+      it "returns true for submitting student if assignment anonymous grading" do
+        expect(@submission.can_view_details?(@student)).to be true
+      end
+
+      it "returns false for non-submitting student if assignment anonymous grading" do
+        new_student = User.create!
+        @context.enroll_student(new_student, enrollment_state: 'active')
+        expect(@submission.can_view_details?(@new_student)).to be false
+      end
+
+      it "returns false for teacher if assignment anonymous grading" do
+        expect(@submission.can_view_details?(@teacher)).to be false
+      end
+
+      it "returns false for admin if assignment anonymous grading" do
+        expect(@submission.can_view_details?(account_admin_user)).to be false
+      end
+
+      it "returns true for site admin if assignment anonymous grading" do
+        expect(@submission.can_view_details?(site_admin_user)).to be true
+      end
+    end
+
+    context 'when the assignment is unmuted' do
+      before(:each) do
+        @assignment.unmute!
+      end
+
+      it "returns false if user isn't present" do
+        expect(@submission).not_to be_can_view_details(nil)
+      end
+
+      it "returns true for submitting student if assignment anonymous grading" do
+        expect(@submission.can_view_details?(@student)).to be true
+      end
+
+      it "returns false for non-submitting student if assignment anonymous grading" do
+        new_student = User.create!
+        @context.enroll_student(new_student, enrollment_state: 'active')
+        expect(@submission.can_view_details?(@new_student)).to be false
+      end
+
+      it "returns true for teacher if assignment anonymous grading" do
+        expect(@submission.can_view_details?(@teacher)).to be true
+      end
+
+      it "returns true for admin if assignment anonymous grading" do
+        expect(@submission.can_view_details?(account_admin_user)).to be true
+      end
+
+      it "returns true for site admin if assignment anonymous grading" do
+        expect(@submission.can_view_details?(site_admin_user)).to be true
+      end
     end
   end
 
   describe "#needs_grading?" do
     before :once do
-      @submission = @assignment.submit_homework(@student, submission_type: 'online_text_entry', body: 'asdf')
+      @submission = @assignment.submit_homework(@student, submission_type: 'online_text_entry', body: 'a body')
     end
 
     it "returns true for submission that has not been graded" do
@@ -4390,6 +5046,16 @@ describe Submission do
     end
   end
 
+  describe "scope: for_assignment" do
+    it "includes all submissions for a given assignment" do
+      first_assignment = @assignment
+      @course.assignments.create!
+
+      submissions = Submission.for_assignment(@assignment)
+      expect(submissions).to match_array(first_assignment.submissions)
+    end
+  end
+
   describe '#filter_attributes_for_user' do
     let(:user) { instance_double('User', id: 1) }
     let(:session) { {} }
@@ -4459,16 +5125,125 @@ describe Submission do
     end
   end
 
+  describe '#provisional_grade' do
+    before(:once) do
+      @assignment.update!(moderated_grading: true, grader_count: 2, final_grader: @teacher)
+      @assignment.grade_student(@student, score: 10, grader: @teacher, provisional: true)
+      @assignment.grade_student(@student, score: 50, grader: @teacher, provisional: true, final: true)
+    end
+    let(:submission) { @assignment.submissions.first }
+
+    it 'returns the provisional grade matching the passed-in scorer if provided' do
+      expect(submission.provisional_grade(@teacher).score).to eq 10
+    end
+
+    it 'returns the final provisional grade if final is true' do
+      expect(submission.provisional_grade(@teacher, final: true).score).to eq 50
+    end
+
+    context 'when no matching grade is found' do
+      let(:non_scorer) { User.new }
+
+      it 'returns a null provisional grade by default' do
+        provisional_grade = submission.provisional_grade(non_scorer)
+        expect(provisional_grade).to be_a(ModeratedGrading::NullProvisionalGrade)
+      end
+
+      it 'returns nil if default_to_null_grade is false' do
+        provisional_grade = submission.provisional_grade(non_scorer, default_to_null_grade: false)
+        expect(provisional_grade).to be nil
+      end
+    end
+  end
+
+  describe '#update_line_item_result' do
+    it 'does nothing if lti_result does not exist' do
+      submission = submission_model assignment: @assignment
+      expect(submission).to receive(:update_line_item_result)
+      submission.save!
+    end
+
+    context 'with lti_result' do
+      let(:lti_result) { lti_result_model({ assignment: @assignment }) }
+      let(:submission) { lti_result.submission }
+
+      it 'does nothing if score has not changed' do
+        lti_result
+        expect(lti_result).not_to receive(:update)
+        submission.save!
+      end
+
+      it 'updates the lti_result score_given if the score has changed' do
+        expect(lti_result.result_score).to eq submission.score
+        submission.update!(score: 1)
+        expect(lti_result.reload.result_score).to eq submission.score
+      end
+    end
+  end
+
+  describe '#delete_ignores' do
+    context 'for submission ignores' do
+      before :once do
+        @submission = @assignment.submissions.find_by!(user_id: @student)
+        @ignore = Ignore.create!(asset: @assignment, user: @student, purpose: 'submitting')
+      end
+
+      it 'should delete submission ignores when asset is submitted' do
+        @assignment.submit_homework(@student, {submission_type: 'online_text_entry', body: 'Hi'})
+        expect {@ignore.reload}.to raise_error ActiveRecord::RecordNotFound
+      end
+
+      it 'should not delete submission ignores when asset is not submitted' do
+        @submission.student_entered_score = 5
+        @submission.save!
+        expect(@ignore.reload).to eq @ignore
+      end
+
+      it 'should delete submission ignores when asset is excused' do
+        @submission.excused = true
+        @submission.save!
+        expect {@ignore.reload}.to raise_error ActiveRecord::RecordNotFound
+      end
+    end
+
+    context 'for grading ignores' do
+      before :once do
+        @student1 = @student
+        @student2 = student_in_course(course: @course, active_all: true).user
+        @sub1 = @assignment.submit_homework(@student1, {submission_type: 'online_text_entry', body: 'Hi'})
+        @sub2 = @assignment.submit_homework(@student2, {submission_type: 'online_text_entry', body: 'Hi'})
+        @ignore = Ignore.create!(asset: @assignment, user: @teacher, purpose: 'grading')
+      end
+
+      it 'should delete grading ignores if every submission is graded or excused' do
+        @sub1.score = 5
+        @sub1.save!
+        @sub2.excused = true
+        @sub2.save!
+        expect {@ignore.reload}.to raise_error ActiveRecord::RecordNotFound
+      end
+
+      it 'should not delete grading ignores if some submissions are ungraded' do
+        @sub1.score = 5
+        @sub1.save!
+        expect(@ignore.reload).to eq @ignore
+      end
+    end
+  end
+
   def submission_spec_model(opts={})
     opts = @valid_attributes.merge(opts)
     assignment = opts.delete(:assignment) || Assignment.find(opts.delete(:assignment_id))
     user = opts.delete(:user) || User.find(opts.delete(:user_id))
     submit_homework = opts.delete(:submit_homework)
 
-    if submit_homework
-      @submission = assignment.submit_homework(user)
-    else
-      @submission = assignment.submissions.find_by!(user: user)
+    @submission = if submit_homework
+                    assignment.submit_homework(user)
+                  else
+                    assignment.submissions.find_by!(user: user)
+                  end
+    unless assignment.grades_published? || @submission.grade_posting_in_progress || assignment.permits_moderation?(user)
+      opts.delete(:grade)
     end
     @submission.update!(opts)
     @submission

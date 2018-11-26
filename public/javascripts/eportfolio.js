@@ -112,17 +112,16 @@ import 'jqueryui/sortable'
       $('#application').append('<div id="eportfolios_move_to_modal_root"></div>')
       modalRoot = document.querySelector('#eportfolios_move_to_modal_root')
     }
-    ReactDOM.render(React.createElement(MoveToDialog, {
-      source: source,
-      destinations: destinations,
-      appElement: appElement,
-      triggerElement: triggerElement,
-      header: dialogLabel,
-      onClose: function() {
+    ReactDOM.render(<MoveToDialog
+      source={source}
+      destinations={destinations}
+      appElement={appElement}
+      triggerElement={triggerElement}
+      header={dialogLabel}
+      onClose={function() {
         setTimeout(function() { ReactDOM.unmountComponentAtNode(modalRoot) })
-      },
-      onMove: onMove
-    }), modalRoot)
+      }}
+      onMove={onMove} />, modalRoot)
   }
 
   $(document).ready(function() {
@@ -452,13 +451,12 @@ import 'jqueryui/sortable'
           return false;
         }
       },
-      success: function(data) {
+      success: function(attachment) {
         var $section = $(this).data('section');
-        var attachment = data.attachment;
         $section.find(".attachment_id").text(attachment.id);
         var url = $(".eportfolio_download_url").attr('href');
         url = $.replaceTags(url, 'uuid', attachment.uuid);
-        if(attachment.content_type.indexOf("image") != -1) {
+        if(attachment['content-type'].indexOf("image") != -1) {
           var $image = $("#eportfolio_view_image").clone(true).removeAttr('id');
           $image.find(".eportfolio_image").attr('src', url).attr('alt', attachment.display_name);
           $image.find(".eportfolio_download").attr('href', url);

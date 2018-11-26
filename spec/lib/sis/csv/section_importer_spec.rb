@@ -39,9 +39,8 @@ describe SIS::CSV::SectionImporter do
     )
     expect(CourseSection.count).to eq before_count + 1
 
-    expect(importer.errors).to eq []
-    warnings = importer.warnings.map { |r| r.last }
-    expect(warnings).to eq ["No course_id given for a section S002",
+    errors = importer.errors.map { |r| r.last }
+    expect(errors).to eq ["No course_id given for a section S002",
                       "No section_id given for a section in course C001",
                       "Improper status \"inactive\" for section S003 in course C002",
                       "No name given for section S004 in course C002",
@@ -73,8 +72,39 @@ describe SIS::CSV::SectionImporter do
       "section_id,course_id,name,start_date,end_date,status",
       "1B,C002,Sec1,2011-1-05 00:00:00,2011-4-14 00:00:00,active"
     )
-    expect(importer.warnings).to eq []
     expect(importer.errors).to eq []
+  end
+
+  it 'should create rollback data' do
+    batch1 = @account.sis_batches.create! { |sb| sb.data = {} }
+    process_csv_data_cleanly(
+      "course_id,short_name,long_name,account_id,term_id,status",
+      "C001,TC 101,Test Course 101,,,active"
+    )
+    process_csv_data_cleanly(
+      "section_id,course_id,name,start_date,end_date,status",
+      "1B,C001,Sec1,2011-1-05 00:00:00,2011-4-14 00:00:00,active"
+    )
+    process_csv_data_cleanly(
+      "user_id,login_id,first_name,last_name,email,status",
+      "U001,user1,User,Uno,user@example.com,active"
+    )
+    process_csv_data_cleanly(
+      "course_id,user_id,role,section_id,status",
+      "C001,U001,student,1B,active"
+    )
+
+    g = Course.where(sis_source_id: 'C001').take.groups.create!(name: 'group')
+    g.group_memberships.create!(user: Pseudonym.where(sis_user_id: 'U001').take.user)
+    process_csv_data_cleanly(
+      "section_id,course_id,name,start_date,end_date,status",
+      "1B,C001,Sec1,2011-1-05 00:00:00,2011-4-14 00:00:00,deleted",
+      batch: batch1
+    )
+    # 1. section, 2. enrollment, 3. group_membership
+    expect(batch1.roll_back_data.count).to eq 3
+    batch1.restore_states_for_batch
+    expect(@account.course_sections.where(sis_source_id: '1B').active.count).to eq 1
   end
 
   it 'should ignore unsupported column account_id' do
@@ -145,9 +175,8 @@ describe SIS::CSV::SectionImporter do
     expect(s2.start_at).to be_nil
     expect(s2.end_at).to be_nil
 
-    expect(importer.warnings.map{|r|r.last}).to eq ["Bad date format for section S002",
+    expect(importer.errors.map{|r|r.last}).to eq ["Bad date format for section S002",
                                                 "Section S003 references course C002 which doesn't exist"]
-    expect(importer.errors).to eq []
   end
 
   it 'should override term dates if the start or end dates are set' do
@@ -203,28 +232,15 @@ describe SIS::CSV::SectionImporter do
   it 'should verify xlist files' do
     importer = process_csv_data(
       "xlist_course_id,section_id,status",
-      ",S001,active"
-    )
-    expect(importer.errors).to eq []
-    expect(importer.warnings.map{|r|r.last}).to eq ["No xlist_course_id given for a cross-listing"]
-    importer = process_csv_data(
-      "xlist_course_id,section_id,status",
-      "X001,,active"
-    )
-    expect(importer.errors).to eq []
-    expect(importer.warnings.map{|r|r.last}).to eq ["No section_id given for a cross-listing"]
-    importer = process_csv_data(
-      "xlist_course_id,section_id,status",
-      "X001,S001,"
-    )
-    expect(importer.errors).to eq []
-    expect(importer.warnings.map{|r|r.last}).to eq ['Improper status "" for a cross-listing']
-    importer = process_csv_data(
-      "xlist_course_id,section_id,status",
+      ",S001,active",
+      "X001,,active",
+      "X001,S001,",
       "X001,S001,baleeted"
     )
-    expect(importer.errors).to eq []
-    expect(importer.warnings.map{|r|r.last}).to eq ['Improper status "baleeted" for a cross-listing']
+    expect(importer.errors.map{|r|r.last}).to eq ["No xlist_course_id given for a cross-listing",
+                                                  "No section_id given for a cross-listing",
+                                                  'Improper status "" for a cross-listing',
+                                                  'Improper status "baleeted" for a cross-listing']
     expect(@account.courses.size).to eq 0
   end
 

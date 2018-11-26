@@ -67,6 +67,8 @@ class LearningOutcomeResult < ActiveRecord::Base
       self.association_object
     elsif self.artifact.is_a?(RubricAssessment)
       self.artifact.rubric_association.association_object
+    elsif self.association_object.is_a? Quizzes::Quiz
+      self.association_object.assignment
     else
       nil
     end
@@ -109,10 +111,10 @@ class LearningOutcomeResult < ActiveRecord::Base
   scope :for_user, lambda { |user| where(:user_id => user) }
   scope :custom_ordering, lambda { |param|
     orders = {
-      'recent' => "assessed_at DESC",
-      'highest' => "score DESC",
-      'oldest' => "score ASC",
-      'default' => "assessed_at DESC"
+      'recent' => {:assessed_at => :desc},
+      'highest' => {:score => :desc},
+      'oldest' => {:score => :asc},
+      'default' => {:assessed_at => :desc}
     }
     order_clause = orders[param] || orders['default']
     order(order_clause)
@@ -121,6 +123,16 @@ class LearningOutcomeResult < ActiveRecord::Base
   scope :for_association, lambda { |association| where(:association_type => association.class.to_s, :association_id => association.id) }
   scope :for_associated_asset, lambda { |associated_asset| where(:associated_asset_type => associated_asset.class.to_s, :associated_asset_id => associated_asset.id) }
   scope :active, lambda { where("content_tags.workflow_state <> 'deleted'").joins(:alignment) }
+  # rubocop:disable Metrics/LineLength
+  scope :exclude_muted_associations, -> {
+    joins("LEFT JOIN #{RubricAssociation.quoted_table_name} rassoc ON rassoc.id = learning_outcome_results.association_id AND learning_outcome_results.association_type = 'RubricAssociation'").
+      joins("LEFT JOIN #{Assignment.quoted_table_name} ra ON ra.id = rassoc.association_id AND rassoc.association_type = 'Assignment' AND rassoc.purpose = 'grading'").
+      joins("LEFT JOIN #{Quizzes::Quiz.quoted_table_name} ON quizzes.id = learning_outcome_results.association_id AND learning_outcome_results.association_type = 'Quizzes::Quiz'").
+      joins("LEFT JOIN #{Assignment.quoted_table_name} qa ON qa.id = quizzes.assignment_id").
+      joins("LEFT JOIN #{Assignment.quoted_table_name} sa ON sa.id = learning_outcome_results.association_id AND learning_outcome_results.association_type = 'Assignment'").
+      where('(ra.muted IS NULL AND qa.muted IS NULL AND sa.muted IS NULL) OR ra.muted IS FALSE OR qa.muted IS FALSE OR sa.muted IS FALSE')
+  }
+  # rubocop:enable Metrics/LineLength
 
   private
 
@@ -140,7 +152,7 @@ class LearningOutcomeResult < ActiveRecord::Base
     scale_points = (self.possible / scale_percent) - self.possible
     scale_cutoff = self.possible - (self.possible * alignment_mastery)
     percent_to_scale = (self.score + scale_cutoff) - self.possible
-    if percent_to_scale > 0
+    if percent_to_scale > 0 && scale_cutoff > 0
       score_adjustment = (percent_to_scale / scale_cutoff) * scale_points
       scaled_score = self.score + score_adjustment
       (scaled_score / self.possible) * scale_percent

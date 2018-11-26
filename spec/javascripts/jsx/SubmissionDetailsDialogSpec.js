@@ -29,11 +29,11 @@ define([
     setup() {
       fakeENV.setup();
       this.clock = sinon.useFakeTimers();
-      this.stub($, 'publish');
+      sandbox.stub($, 'publish');
       ENV.GRADEBOOK_OPTIONS = {
         has_grading_periods: false
       };
-      this.stub($, 'ajaxJSON');
+      sandbox.stub($, 'ajaxJSON');
 
       assignment = {
         id: 1,
@@ -58,13 +58,12 @@ define([
 
   test('flashWarning is called when score is 150% points possible', function() {
     const submissionsDetailsDialog = new SubmissionDetailsDialog(assignment, student, options);
-    const flashWarningStub = this.stub($, 'flashWarning');
+    const flashWarningStub = sandbox.stub($, 'flashWarning');
     $('.submission_details_grade_form', submissionsDetailsDialog.dialog).trigger('submit');
     const callback = $.ajaxJSON.getCall(1).args[3];
     callback({ score: 15, excused: false });
     this.clock.tick(510);
     ok(flashWarningStub.calledOnce);
-    submissionsDetailsDialog.dialog.dialog('destroy');
   });
 
   test("display name by default", function () {
@@ -83,7 +82,6 @@ define([
     submissionDetailsDialog.update(submissionData);
 
     strictEqual(document.querySelector('address').innerText.includes('Some Author'), true);
-    submissionDetailsDialog.dialog.dialog('destroy');
   });
 
   test("when anonymous hides student's name from address section", function () {

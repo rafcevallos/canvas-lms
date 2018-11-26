@@ -208,18 +208,20 @@ describe "master courses sidebar" do
     end
 
     it "updates screenreader character usage message with character count" do
+      skip('This needs to be skipped until ADMIN-793 is resolved')
       inmsg = '1234567890123456789012345678901234567890'
       open_blueprint_sidebar
       # if the default ever changes in MigrationOptions, make sure our spec still works
-      driver.execute_script('ENV.MIGRATION_OPTIONS_SR_ALERT_TIMEOUT = 10')
+      driver.execute_script('ENV.MIGRATION_OPTIONS_SR_ALERT_TIMEOUT = 15')
       send_notification_checkbox.click
       add_message_checkbox.click
       # we don't start adding the message until 90% full
       notification_message_text_box.send_keys(inmsg + inmsg + inmsg + 'abcdefg')
-      n = ff('#flash_screenreader_holder span').length  # sometimes there's an empty span in there?!?
-      msg = f("#flash_screenreader_holder span:nth-of-type(#{n})").attribute("textContent")
-      msg.strip!
-      expect(msg).to eq("127 of 140 maximum characters")
+      alert_text = '127 of 140 maximum characters'
+      # the screenreader message is displayed after a 600ms delay
+      # not waiting leads to a flakey spec
+      wait = Selenium::WebDriver::Wait.new(:timeout => 0.7)
+      wait.until {expect(fj("#flash_screenreader_holder:contains(#{alert_text})")).to be_present}
     end
 
     it "issues screenreader alert when message is full" do
@@ -227,12 +229,10 @@ describe "master courses sidebar" do
       open_blueprint_sidebar
       send_notification_checkbox.click
       add_message_checkbox.click
-      n = ff('#flash_screenreader_holder span').length  # sometimes there's an empty span in there?!?
       notification_message_text_box.send_keys(msg+msg+'12')
-      # +15 because we want to see that it has all the character messages ontop of having the ending message
-      msg = f("#flash_screenreader_holder span:nth-of-type(#{n+15})").attribute("textContent")
-      msg.strip!
-      expect(msg).to eq("You have reached the limit of 140 characters in the notification message")
+      alert_text = 'You have reached the limit of 140 characters in the notification message'
+
+      expect(fj("#flash_screenreader_holder:contains(#{alert_text})")).to be_present
     end
 
     context "before sync" do

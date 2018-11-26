@@ -33,6 +33,7 @@ if ENV['COVERAGE'] == "1"
 end
 
 require File.expand_path('../../config/environment', __FILE__) unless defined?(Rails)
+
 require 'rspec/rails'
 
 require 'webmock'
@@ -61,46 +62,28 @@ GreatExpectations.install!
 
 ActionView::TestCase::TestController.view_paths = ApplicationController.view_paths
 
-if CANVAS_RAILS5_0
-  module EnforceKwargTestFormat
-    def non_kwarg_request_warning
-      raise "Please use keyword arguments in your calls in controller/integration specs. e.g. `get :show, params: {id: 1}`"
-    end
-  end
-  [ActionDispatch::Integration::Session, ActionController::TestCase::Behavior].each do |mod|
-    mod.prepend(EnforceKwargTestFormat)
-  end
-end
-
 # this makes sure that a broken transaction becomes functional again
 # by the time we hit rescue_action_in_public, so that the error report
 # can be recorded
-ActionController::Base.set_callback(:process_action, :around, ->(_r, block) do
-  exception = nil
-  ActiveRecord::Base.transaction(joinable: false, requires_new: true) do
-    begin
-      if Rails.version < '5'
-        # that transaction didn't count as a "real" transaction within the test
-        test_open_transactions = ActiveRecord::Base.connection.instance_variable_get(:@test_open_transactions)
-        ActiveRecord::Base.connection.instance_variable_set(:@test_open_transactions, test_open_transactions.to_i - 1)
-        begin
-          block.call
-        ensure
-          ActiveRecord::Base.connection.instance_variable_set(:@test_open_transactions, test_open_transactions)
-        end
-      else
+module SpecTransactionWrapper
+  def self.wrap_block_in_transaction(block)
+    exception = nil
+    ActiveRecord::Base.transaction(joinable: false, requires_new: true) do
+      begin
         block.call
+      rescue ActiveRecord::StatementInvalid
+        # these need to properly roll back the transaction
+        raise
+      rescue
+        # anything else, the transaction needs to commit, but we need to re-raise outside the transaction
+        exception = $!
       end
-    rescue ActiveRecord::StatementInvalid
-      # these need to properly roll back the transaction
-      raise
-    rescue
-      # anything else, the transaction needs to commit, but we need to re-raise outside the transaction
-      exception = $!
     end
+    raise exception if exception
   end
-  raise exception if exception
-end)
+end
+ActionController::Base.set_callback(:process_action, :around,
+  ->(_r, block) { SpecTransactionWrapper.wrap_block_in_transaction(block) })
 
 module RSpec::Core::Hooks
 class AfterContextHook < Hook
@@ -209,9 +192,8 @@ require File.expand_path(File.dirname(__FILE__) + '/ams_spec_helper')
 
 require 'i18n_tasks'
 
-factories = "#{File.dirname(__FILE__).gsub(/\\/, "/")}/factories/*.rb"
 legit_global_methods = Object.private_methods
-Dir.glob(factories).each { |file| require file }
+Dir[File.dirname(__FILE__) + "/factories/**/*.rb"].each {|f| require f }
 crap_factories = (Object.private_methods - legit_global_methods)
 if crap_factories.present?
   $stderr.puts "\e[31mError: Don't create global factories/helpers"
@@ -221,8 +203,7 @@ if crap_factories.present?
   exit! 1
 end
 
-examples = "#{File.dirname(__FILE__).gsub(/\\/, "/")}/shared_examples/*.rb"
-Dir.glob(examples).each { |file| require file }
+Dir[File.dirname(__FILE__) + "/shared_examples/**/*.rb"].each {|f| require f }
 
 # rspec aliases :describe to :context in a way that it's pretty much defined
 # globally on every object. :context is already heavily used in our application,
@@ -235,7 +216,10 @@ if defined?(Spec::DSL::Main)
   end
 end
 
+RSpec::Mocks.configuration.allow_message_expectations_on_nil = false
+
 RSpec::Matchers.define_negated_matcher :not_eq, :eq
+RSpec::Matchers.define_negated_matcher :not_have_key, :have_key
 
 RSpec::Matchers.define :encompass do |expected|
   match do |actual|
@@ -256,6 +240,27 @@ RSpec::Matchers.define :match_ignoring_whitespace do |expected|
 
   match do |actual|
     whitespaceless(actual) == whitespaceless(expected)
+  end
+end
+
+RSpec::Matchers.define :match_path do |expected|
+  match do |actual|
+    path = URI(actual).path
+    values_match?(expected, path)
+  end
+end
+
+RSpec::Matchers.define :and_query do |expected|
+  match do |actual|
+    query = Rack::Utils.parse_query(URI(actual).query)
+    values_match?(expected, query)
+  end
+end
+
+RSpec::Matchers.define :and_fragment do |expected|
+  match do |actual|
+    fragment = JSON.parse(URI.decode_www_form_component(URI(actual).fragment))
+    values_match?(expected, fragment)
   end
 end
 
@@ -285,8 +290,8 @@ module Helpers
       assert_status(401)
     else
       # Certain responses require more privileges than the current user has (ie site admin)
-      expect(response).to redirect_to(login_url)
-                      .or redirect_to(root_url)
+      expect(response).to redirect_to(login_url).
+        or redirect_to(root_url)
     end
   end
 
@@ -310,16 +315,26 @@ RSpec::Expectations.configuration.on_potential_false_positives = :raise
 RSpec.configure do |config|
   config.use_transactional_fixtures = true
   config.use_instantiated_fixtures = false
-  config.fixture_path = Rails.root+'spec/fixtures/'
+  config.fixture_path = Rails.root.join('spec', 'fixtures')
   config.infer_spec_type_from_file_location!
   config.raise_errors_for_deprecations!
   config.color = true
   config.order = :random
 
+  # The Pact specs have prerequisite setup steps so we exclude them by default
+  config.filter_run_excluding :pact_live_events if ENV.fetch('RUN_LIVE_EVENTS_CONTRACT_TESTS', '0') == '0'
+
   config.include Helpers
   config.include Factories
+  config.include RequestHelper, type: :request
   config.include Onceler::BasicHelpers
   config.project_source_dirs << "gems" # so that failures here are reported properly
+
+  if ENV['RAILS_LOAD_ALL_LOCALES'] && RSpec.configuration.filter.rules[:i18n]
+    config.around :each do |example|
+      SpecMultipleLocales.run(example)
+    end
+  end
 
   config.around(:each) do |example|
     Rails.logger.info "STARTING SPEC #{example.full_description}"
@@ -343,7 +358,7 @@ RSpec.configure do |config|
     RoleOverride.clear_cached_contexts
     Delayed::Job.redis.flushdb if Delayed::Job == Delayed::Backend::Redis::Job
     Rails::logger.try(:info, "Running #{self.class.description} #{@method_name}")
-    Attachment.domain_namespace = nil
+    Attachment.current_root_account = nil
     Canvas::DynamicSettings.reset_cache!
     ActiveRecord::Migration.verbose = false
     RequestStore.clear!
@@ -399,6 +414,11 @@ RSpec.configure do |config|
     end
 
     Timecop.safe_mode = true
+
+    # cache brand variables because if we try to look them up inside a Timecop
+    # block, we will conflict our active record patch to prevent future
+    # migrations.
+    BrandableCSS.default_variables_md5
   end
 
   config.before do
@@ -458,6 +478,44 @@ RSpec.configure do |config|
     Canvas.redis_used = false
   end
 
+  if Bullet.enable?
+    config.before(:each) do |example|
+      Bullet.start_request
+      # we walk the example group chain until we reach one that actually recorded something
+      oncie = example.example_group
+      oncie = oncie.superclass while oncie && !oncie.onceler&.tape && oncie.superclass.respond_to?(:onceler)
+
+      possible_objects, impossible_objects = oncie.onceler.instance_variable_get(:@bullet_state)
+      possible_objects&.each { |object| Bullet::Detector::NPlusOneQuery.possible_objects.add(object) }
+      impossible_objects&.each { |object| Bullet::Detector::NPlusOneQuery.impossible_objects.add(object) }
+    end
+
+    config.after(:each) do
+      Bullet.perform_out_of_channel_notifications if Bullet.notification?
+      Bullet.end_request
+    end
+
+    Onceler.configure do |config|
+      config.before(:record) do
+        Bullet.start_request
+        possible_objects, impossible_objects =
+          onceler.parent&.instance_variable_get(:@bullet_state)
+        possible_objects&.each { |object| Bullet::Detector::NPlusOneQuery.possible_objects.add(object) }
+        impossible_objects&.each { |object| Bullet::Detector::NPlusOneQuery.impossible_objects.add(object) }
+      end
+
+      config.after(:record) do |tape|
+        tape.onceler.instance_variable_set(:@bullet_state, [
+          Bullet::Detector::NPlusOneQuery.possible_objects.registry.values.map(&:to_a).flatten,
+          Bullet::Detector::NPlusOneQuery.impossible_objects.registry.values.map(&:to_a).flatten,
+        ])
+
+        Bullet.perform_out_of_channel_notifications if Bullet.notification?
+        Bullet.end_request
+      end
+    end
+  end
+
   #****************************************************************
   # There used to be a lot of factory methods here!
   # In an effort to move us toward a nicer test factory solution,
@@ -504,7 +562,7 @@ RSpec.configure do |config|
   end
 
   def default_uploaded_data
-    fixture_file_upload('scribd_docs/doc.doc', 'application/msword', true)
+    fixture_file_upload('docs/doc.doc', 'application/msword', true)
   end
 
   def factory_with_protected_attributes(ar_klass, attrs, do_save = true)
@@ -530,18 +588,25 @@ RSpec.configure do |config|
     dir
   end
 
-  def process_csv_data(*lines)
-    opts = lines.extract_options!
-    opts.reverse_merge!(allow_printing: false)
-    account = opts[:account] || @account || account_model
-
+  def generate_csv_file(lines)
     tmp = Tempfile.new("sis_rspec")
     path = "#{tmp.path}.csv"
     tmp.close!
     File.open(path, "w+") { |f| f.puts lines.flatten.join "\n" }
+    path
+  end
+
+  def process_csv_data(*lines)
+    opts = lines.extract_options!
+    opts.reverse_merge!(allow_printing: false)
+    account = opts[:account] || @account || account_model
+    opts[:batch] ||= account.sis_batches.create!
+
+    path = generate_csv_file(lines)
     opts[:files] = [path]
 
-    importer = SIS::CSV::Import.process(account, opts)
+    importer = SIS::CSV::ImportRefactored.process(account, opts)
+    run_jobs
 
     File.unlink path
 
@@ -551,7 +616,7 @@ RSpec.configure do |config|
   def process_csv_data_cleanly(*lines_or_opts)
     importer = process_csv_data(*lines_or_opts)
     raise "csv errors: #{importer.errors.inspect}" if importer.errors.present?
-    raise "csv warning: #{importer.warnings.inspect}" if importer.warnings.present?
+    importer
   end
 
   def enable_cache(new_cache=:memory_store)
@@ -792,7 +857,7 @@ RSpec.configure do |config|
   end
 
   def dummy_io
-    fixture_file_upload('scribd_docs/doc.doc', 'application/msword', true)
+    fixture_file_upload('docs/doc.doc', 'application/msword', true)
   end
 
   def consider_all_requests_local(value)
@@ -819,9 +884,15 @@ RSpec.configure do |config|
       klass.connection.bulk_insert klass.table_name, records
       return if return_type == :nil
       scope = klass.order("id DESC").limit(records.size)
-      return_type == :record ?
-        scope.to_a.reverse :
+      if return_type == :record
+        records = scope.to_a.reverse
+        if Bullet.enable?
+          records.each { |record| Bullet::Detector::NPlusOneQuery.add_impossible_object(record) }
+        end
+        records
+      else
         scope.pluck(:id).reverse
+      end
     end
   end
 end
@@ -855,16 +926,11 @@ class I18n::Backend::Simple
   alias_method :available_locales_without_stubs, :available_locales
 end
 
-Dir[Rails.root+'{gems,vendor}/plugins/*/spec_canvas/spec_helper.rb'].each do |f|
-  require f
-end
+Dir[Rails.root+'{gems,vendor}/plugins/*/spec_canvas/spec_helper.rb'].each { |file| require file }
 
 Shoulda::Matchers.configure do |config|
   config.integrate do |with|
-    # Choose a test framework:
     with.test_framework :rspec
-
-    # Choose one or more libraries:
     with.library :active_record
     with.library :active_model
     # Disable the action_controller matchers until shoulda-matchers supports new compound matchers

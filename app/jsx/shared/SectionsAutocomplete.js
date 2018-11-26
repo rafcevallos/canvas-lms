@@ -15,52 +15,81 @@
  * You should have received a copy of the GNU Affero General Public License along
  * with this program. If not, see <http://www.gnu.org/licenses/>.
  */
-import Autocomplete from '@instructure/ui-core/lib/components/Autocomplete'
-import Container from '@instructure/ui-core/lib/components/Container'
-import AccessibleContent from '@instructure/ui-core/lib/components/AccessibleContent'
+import Select from '@instructure/ui-forms/lib/components/Select'
+import View from '@instructure/ui-layout/lib/components/View'
+import AccessibleContent from '@instructure/ui-a11y/lib/components/AccessibleContent'
 import React from 'react'
 import I18n from 'i18n!sections_autocomplete'
+import PropTypes from 'prop-types'
 import propTypes from './proptypes/sectionShape'
 
-const ALL_MY_SECTIONS_OBJ = {id: 'all', name: I18n.t('All my sections')}
+const ALL_SECTIONS_OBJ = {id: 'all', name: I18n.t('All Sections')}
 
 function extractIds(arr) {
   return arr.map((element) => element.id)
 }
 
+function sortSectionName(a,b) {
+  if(a.name.toLowerCase() < b.name.toLowerCase()) return -1;
+  if(a.name.toLowerCase() > b.name.toLowerCase()) return 1;
+  return 0;
+}
+
 export default class SectionsAutocomplete extends React.Component {
   static propTypes = {
     sections: propTypes.sectionList.isRequired,
-    selectedSections: propTypes.sectionList
+    selectedSections: propTypes.sectionList,
+    disabled: PropTypes.bool,
+    disableDiscussionOptions: PropTypes.func,
+    enableDiscussionOptions: PropTypes.func
   }
   static defaultProps = {
-    selectedSections: [ALL_MY_SECTIONS_OBJ]
+    selectedSections: [ALL_SECTIONS_OBJ],
+    disabled: false,
+    disableDiscussionOptions: (() => {}),
+    enableDiscussionOptions: (() => {})
   }
 
   state = {
-    sections: this.props.sections.concat([ALL_MY_SECTIONS_OBJ]),
+    sections: this.props.sections.concat([ALL_SECTIONS_OBJ]).sort(sortSectionName),
     selectedSectionsValue: extractIds(this.props.selectedSections),
     messages: []
+  }
+
+  componentWillMount() {
+    this.updateDiscussionOptions()
+  }
+
+  componentDidUpdate() {
+    this.updateDiscussionOptions()
   }
 
   onAutocompleteChange = (_, value) => {
     if(!value.length) {
       this.setState({selectedSectionsValue: [], messages: [{ text: I18n.t('A section is required'), type: 'error' }]})
-    } else if (this.state.selectedSectionsValue.includes(ALL_MY_SECTIONS_OBJ.id)) {
+    } else if (this.state.selectedSectionsValue.includes(ALL_SECTIONS_OBJ.id)) {
       this.setState({
-        selectedSectionsValue: extractIds(value.filter((section) => section.id !== ALL_MY_SECTIONS_OBJ.id)),
+        selectedSectionsValue: extractIds(value.filter((section) => section.id !== ALL_SECTIONS_OBJ.id)),
         messages: []
       })
-    } else if (extractIds(value).includes(ALL_MY_SECTIONS_OBJ.id)) {
-      this.setState({selectedSectionsValue: [ALL_MY_SECTIONS_OBJ.id], messages: []})
+    } else if (extractIds(value).includes(ALL_SECTIONS_OBJ.id)) {
+      this.setState({selectedSectionsValue: [ALL_SECTIONS_OBJ.id], messages: []})
     } else {
       this.setState({selectedSectionsValue: extractIds(value), messages: []})
     }
   }
 
+  updateDiscussionOptions() {
+    if (this.state.selectedSectionsValue.includes(ALL_SECTIONS_OBJ.id)) {
+      this.props.enableDiscussionOptions()
+    } else {
+      this.props.disableDiscussionOptions()
+    }
+  }
+
   render () {
     return (
-      <Container
+      <View
         display="block"
         margin="0 0 large 0"
       >
@@ -68,11 +97,13 @@ export default class SectionsAutocomplete extends React.Component {
           name="specific_sections"
           type="hidden"
           value={this.state.selectedSectionsValue}/>
-        <Autocomplete
+        <Select
+          editable
           label={I18n.t('Post to')}
           selectedOption={this.state.selectedSectionsValue}
           messages={this.state.messages}
           multiple
+          disabled={this.props.disabled}
           onChange={this.onAutocompleteChange}
           formatSelectedOption={(tag) => (
             <AccessibleContent alt={I18n.t(`Remove %{label}`, {label: tag.label})}>{tag.label}</AccessibleContent>
@@ -83,8 +114,8 @@ export default class SectionsAutocomplete extends React.Component {
               {section.name}
             </option>
           ))}
-        </Autocomplete>
-      </Container>
+        </Select>
+      </View>
     )
   }
 }

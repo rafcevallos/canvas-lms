@@ -36,7 +36,7 @@ class Group < ActiveRecord::Base
   belongs_to :context, polymorphic: [:course, { context_account: 'Account' }]
   belongs_to :group_category
   belongs_to :account
-  belongs_to :root_account, :class_name => "Account"
+  belongs_to :root_account, class_name: 'Account', inverse_of: :all_groups
   has_many :calendar_events, :as => :context, :inverse_of => :context, :dependent => :destroy
   has_many :discussion_topics, -> { where("discussion_topics.workflow_state<>'deleted'").preload(:user).order('discussion_topics.position DESC, discussion_topics.created_at DESC') }, dependent: :destroy, as: :context, inverse_of: :context
   has_many :active_discussion_topics, -> { where("discussion_topics.workflow_state<>'deleted'").preload(:user) }, as: :context, inverse_of: :context, class_name: 'DiscussionTopic'
@@ -57,7 +57,7 @@ class Group < ActiveRecord::Base
   belongs_to :wiki
   has_many :wiki_pages, as: :context, inverse_of: :context
   has_many :web_conferences, :as => :context, :inverse_of => :context, :dependent => :destroy
-  has_many :collaborations, -> { order("#{Collaboration.quoted_table_name}.title, #{Collaboration.quoted_table_name}.created_at") }, as: :context, inverse_of: :context, dependent: :destroy
+  has_many :collaborations, -> { order(Arel.sql("collaborations.title, collaborations.created_at")) }, as: :context, inverse_of: :context, dependent: :destroy
   has_many :media_objects, :as => :context, :inverse_of => :context
   has_many :content_migrations, :as => :context, :inverse_of => :context
   has_many :content_exports, :as => :context, :inverse_of => :context
@@ -71,7 +71,7 @@ class Group < ActiveRecord::Base
 
   after_create :refresh_group_discussion_topics
 
-  after_update :clear_cached_short_name, :if => :name_changed?
+  after_update :clear_cached_short_name, :if => :saved_change_to_name?
 
   delegate :time_zone, :to => :context
 
@@ -193,6 +193,10 @@ class Group < ActiveRecord::Base
 
   def context_code
     raise "DONT USE THIS, use .short_name instead" unless Rails.env.production?
+  end
+
+  def inactive?
+    self.context.deleted? || (self.context.is_a?(Course) && self.context.inactive?)
   end
 
   def context_available?
@@ -442,13 +446,17 @@ class Group < ActiveRecord::Base
     self.join_level ||= 'invitation_only'
     self.is_public ||= false
     self.is_public = false unless self.group_category.try(:communities?)
+    set_default_account
+  end
+  private :ensure_defaults
+
+  def set_default_account
     if self.context && self.context.is_a?(Course)
       self.account = self.context.account
     elsif self.context && self.context.is_a?(Account)
       self.account = self.context
     end
   end
-  private :ensure_defaults
 
   # update root account when account changes
   def account=(new_account)
@@ -483,6 +491,7 @@ class Group < ActiveRecord::Base
       can :manage_files and
       can :manage_wiki and
       can :post_to_forum and
+      can :create_forum and
       can :read and
       can :read_forum and
       can :read_announcements and
@@ -531,6 +540,7 @@ class Group < ActiveRecord::Base
       can :manage_wiki and
       can :moderate_forum and
       can :post_to_forum and
+      can :create_forum and
       can :read and
       can :read_forum and
       can :read_announcements and
@@ -542,6 +552,9 @@ class Group < ActiveRecord::Base
 
       given { |user, session| self.context && self.context.grants_all_rights?(user, session, :read_as_admin, :post_to_forum) }
       can :post_to_forum
+
+      given { |user, session| self.context && self.context.grants_all_rights?(user, session, :read_as_admin, :create_forum) }
+      can :create_forum
 
       given { |user, session| self.context && self.context.grants_right?(user, session, :view_group_pages) }
       can :read and can :read_forum and can :read_announcements and can :read_roster
@@ -561,6 +574,12 @@ class Group < ActiveRecord::Base
 
       given {|user, session| self.context && self.context.grants_right?(user, session, :read_sis)}
       can :read_sis
+
+      given {|user, session| self.context && self.context.grants_right?(user, session, :view_user_logins)}
+      can :view_user_logins
+
+      given {|user, session| self.context && self.context.grants_right?(user, session, :read_email_addresses)}
+      can :read_email_addresses
     end
   end
 
@@ -580,7 +599,6 @@ class Group < ActiveRecord::Base
     end
     return false
   end
-  private :can_participate?
 
   def can_join?(user)
     if self.context.is_a?(Course)
@@ -753,6 +771,14 @@ class Group < ActiveRecord::Base
     Folder.unique_constraint_retry do
       @submissions_folder = self.folders.where(parent_folder_id: Folder.root_folders(self).first, submission_context_code: 'root')
         .first_or_create!(name: I18n.t('Submissions'))
+    end
+  end
+
+  def grading_standard_or_default
+    if context.respond_to?(:grading_standard_or_default)
+      context.grading_standard_or_default
+    else
+      GradingStandard.default_instance
     end
   end
 end

@@ -18,7 +18,7 @@
 define [
   'jquery'
   'underscore'
-  'i18n!gradebook'
+  'i18nObj'
   'jsx/shared/helpers/numberHelper'
   'jsx/gradebook/shared/helpers/GradeFormatHelper'
   '../gradebook/GradebookTranslations'
@@ -29,7 +29,7 @@ define [
   'jquery.ajaxJSON'
   'jquery.instructure_misc_helpers' # raw
 ], ($, _, I18n, numberHelper, GradeFormatHelper, GRADEBOOK_TRANSLATIONS,
-  OutlierScoreHelper, htmlEscape, {extractDataTurnitin}, round) ->
+  { default: OutlierScoreHelper }, htmlEscape, {extractDataTurnitin}, round) ->
 
   class SubmissionCell
 
@@ -174,7 +174,12 @@ define [
       classes.push('resubmitted') if submission.grade_matches_current_submission == false
       classes.push('late') if submission.late
       classes.push('ungraded') if ''+assignment.submission_types is "not_graded"
-      classes.push('muted') if assignment.muted
+      if assignment.anonymize_students
+        classes.push('anonymous')
+      else if assignment.moderation_in_progress
+        classes.push('moderated')
+      else if assignment.muted
+        classes.push('muted')
       classes.push(submission.submission_type) if submission.submission_type
       classes
 

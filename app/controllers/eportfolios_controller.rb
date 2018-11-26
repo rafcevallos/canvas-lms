@@ -24,6 +24,7 @@ class EportfoliosController < ApplicationController
   before_action :require_user, :only => [:index, :user_index]
   before_action :reject_student_view_student
   before_action :rich_content_service_config
+  before_action :get_eportfolio, :except => [:index, :user_index, :create]
 
   def index
     user_index
@@ -57,7 +58,6 @@ class EportfoliosController < ApplicationController
   end
 
   def show
-    @portfolio = Eportfolio.active.find(params[:id])
     if params[:verifier] == @portfolio.uuid
       session[:eportfolio_ids] ||= []
       session[:eportfolio_ids] << @portfolio.id
@@ -92,15 +92,11 @@ class EportfoliosController < ApplicationController
 
         # otherwise, if  I can otherwise view the user, link directly to them
         @owner_url ||= user_url(@portfolio.user) if @portfolio.user.grants_right?(@current_user, :view_statistics)
-
-        js_env :folder_id => Folder.unfiled_folder(@current_user).id,
-               :context_code => @current_user.asset_string
       end
     end
   end
 
   def update
-    @portfolio = Eportfolio.find(params[:id])
     if authorized_action(@portfolio, @current_user, :update)
       respond_to do |format|
         if @portfolio.update_attributes(eportfolio_params)
@@ -117,7 +113,6 @@ class EportfoliosController < ApplicationController
   end
 
   def destroy
-    @portfolio = Eportfolio.find(params[:id])
     if authorized_action(@portfolio, @current_user, :delete)
       respond_to do |format|
         if @portfolio.destroy
@@ -133,7 +128,6 @@ class EportfoliosController < ApplicationController
   end
 
   def reorder_categories
-    @portfolio = Eportfolio.find(params[:eportfolio_id])
     if authorized_action(@portfolio, @current_user, :update)
       @portfolio.eportfolio_categories.build.update_order(params[:order].split(","))
       render :json => @portfolio.eportfolio_categories.map{|c| [c.id, c.position]}, :status => :ok
@@ -141,7 +135,6 @@ class EportfoliosController < ApplicationController
   end
 
   def reorder_entries
-    @portfolio = Eportfolio.find(params[:eportfolio_id])
     if authorized_action(@portfolio, @current_user, :update)
       @category = @portfolio.eportfolio_categories.find(params[:eportfolio_category_id])
       @category.eportfolio_entries.build.update_order(params[:order].split(","))
@@ -151,7 +144,6 @@ class EportfoliosController < ApplicationController
 
   def export
     zip_filename = "eportfolio.zip"
-    @portfolio = Eportfolio.find(params[:eportfolio_id])
     if authorized_action(@portfolio, @current_user, :update)
       @attachments = @portfolio.attachments.not_deleted.
         where(display_name: zip_filename,
@@ -174,13 +166,14 @@ class EportfoliosController < ApplicationController
       else
         respond_to do |format|
           if @attachment.zipped?
-            if Attachment.s3_storage?
-              format.html { redirect_to @attachment.inline_url }
-              format.zip { redirect_to @attachment.inline_url }
-            else
+            if @attachment.stored_locally?
               cancel_cache_buster
               format.html { send_file(@attachment.full_filename, :type => @attachment.content_type_with_encoding, :disposition => 'inline') }
               format.zip { send_file(@attachment.full_filename, :type => @attachment.content_type_with_encoding, :disposition => 'inline') }
+            else
+              inline_url = authenticated_inline_url(@attachment)
+              format.html { redirect_to inline_url }
+              format.zip { redirect_to inline_url }
             end
             format.json { render :json => @attachment.as_json(:methods => :readable_size) }
           else
@@ -194,13 +187,7 @@ class EportfoliosController < ApplicationController
     end
   end
 
-  def stale_zip_file?
-    @attachment.created_at < 1.hour.ago ||
-      @attachment.created_at < (@portfolio.eportfolio_entries.map(&:updated_at).compact.max || @attachment.created_at)
-  end
-
   def public_feed
-    @portfolio = Eportfolio.find(params[:eportfolio_id])
     if @portfolio.public || params[:verifier] == @portfolio.uuid
       @entries = @portfolio.eportfolio_entries.order('eportfolio_entries.created_at DESC').to_a
       feed = Atom::Feed.new do |f|
@@ -227,5 +214,14 @@ class EportfoliosController < ApplicationController
 
   def eportfolio_params
     params.require(:eportfolio).permit(:name, :public)
+  end
+
+  def get_eportfolio
+    @portfolio = Eportfolio.active.find(params[:eportfolio_id] || params[:id])
+  end
+
+  def stale_zip_file?
+    @attachment.created_at < 1.hour.ago ||
+      @attachment.created_at < (@portfolio.eportfolio_entries.map(&:updated_at).compact.max || @attachment.created_at)
   end
 end

@@ -34,11 +34,19 @@
   h2, .h2 {
     @include fontSize($ic-font-size--small);
     overflow: hidden;
-    line-height: 1.2em;
     border-bottom: 1px solid $ic-border-light;
-    padding-bottom: $ic-sp / 3;
+    padding-bottom: $ic-sp / 2;
     margin: 0 0 $ic-sp / 2;
     font-weight: bold;
+  }
+  .shared-space {
+    padding-bottom: 0;
+    h2 {
+      display: inline-block;
+      margin-bottom: 0;
+      padding-bottom: 0;
+      border-bottom-style: none;
+    }
   }
 }
 
@@ -71,7 +79,7 @@
       // this is to give todo and event icons some breathing room
       > i {
           min-width: $ic-sp * 2;
-          padding-right: $ic-sp;
+          padding-#{direction(right)}: $ic-sp;
           box-sizing: border-box;
           color: lighten( $grayDark, 15% );
       }
@@ -83,7 +91,6 @@
     // this is for things like "nothing for the next week"
     small {
       display: block;
-      font-style: italic;
       @include fontSize(13px);
     }
     b, em, p {
@@ -104,7 +111,6 @@
       }
     }
     .more_link {
-      font-style: italic;
       padding-top: 6px;
     }
   }
@@ -122,7 +128,7 @@
   }
   .tooltip {
     .tooltip_wrap {
-      left: -185px;
+      #{direction(left)}: -185px;
       width: 185px;
       height: 70px;
       top: 0;
@@ -130,16 +136,16 @@
       background-image: none;
     }
     .tooltip_text {
-      margin-right: 15px;
+      margin-#{direction(right)}: 15px;
       min-height: 30px;
     }
     .tooltip-carat {
       border-bottom: 7px solid transparent;
-      border-left: 14px solid #444444;
+      border-#{direction(left)}: 14px solid #444444;
       border-top: 7px solid transparent;
       display: block;
       margin-top: 12px;
-      float: right;
+      float: direction(right);
       width: 1px;
       height: 1px;
     }
@@ -156,20 +162,20 @@
 }
 
 #right-side .todo-list-header {
-  margin-top: 29px; // magic number to align with header bottom border
+  margin-top: 1.0625rem; // magic number to align with header bottom border
 }
 #right-side .right-side-list .todo-badge-wrapper {
   display: inline-block;
   vertical-align: top;
   min-width: 40px;
-  text-align: right;
-  padding-right: $ic-sp;
+  text-align: direction(right);
+  padding-#{direction(right)}: $ic-sp;
   box-sizing: border-box;
 }
 // this is the ignore x-icon on todo list
 #right-side .right-side-list .disable_item_link {
   position: absolute;
-  right: 0;
+  #{direction(right)}: 0;
   top: 0.5rem;
   z-index: 2;
   padding: 0;

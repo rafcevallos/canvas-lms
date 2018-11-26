@@ -382,6 +382,22 @@ describe "people" do
     it "should validate that a TA cannot rename a teacher"
   end
 
+  context "people as a student" do
+
+    before (:each) do
+      course_with_student_logged_in(:active_all => true)
+    end
+
+    it "should not link avatars to a user's profile page if profiles are disabled" do
+      @course.account.settings[:enable_profiles] = false
+      @course.account.enable_service(:avatars)
+      @course.account.save!
+      get "/courses/#{@course.id}/users/#{@student.id}"
+      expect(f('.avatar')['href']).not_to be_present
+    end
+
+  end
+
   context "course with multiple sections", priority: "2" do
     before(:each) do
       course_with_teacher_logged_in
@@ -694,6 +710,7 @@ describe "people" do
     context "student tray" do
 
       before(:each) do
+        preload_graphql_schema
         @account = Account.default
         @account.enable_feature!(:student_context_cards)
         @student = create_user('student@test.com')
