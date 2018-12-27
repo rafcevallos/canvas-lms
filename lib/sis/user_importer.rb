@@ -194,6 +194,8 @@ module SIS
             pseudo.authentication_provider = nil
           end
           pseudo.sis_user_id = user_row.user_id
+          pseudo.school_id = user_row.school_id
+          pseudo.ext_id = user_row.ext_id
           pseudo_by_integration = nil
           pseudo_by_integration = @root_account.pseudonyms.where(integration_id: user_row.integration_id.to_s).take if user_row.integration_id.present?
           if pseudo_by_integration && status_is_active && pseudo_by_integration != pseudo
