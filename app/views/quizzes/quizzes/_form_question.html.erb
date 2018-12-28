@@ -133,6 +133,14 @@
     <div style="text-align: center;">
       <textarea style="width: 90%; height: 120px;" class="question_content" name="question_text"></textarea>
     </div>
+    <label>Standard:</label>
+    <select name="standard_id" class="standard_id">
+        <option value="">None</option>
+        <% @standards.each do |standard| %>
+            <option value="<%= standard[:id] %>"><%= standard[:code] %> - <%= (standard[:description] || '').truncate(30) %></option>
+        <% end %>
+    </select>
+    <div class="clear"></div>
     <b tabindex="0" role="heading" class="answers_header"><%= before_label(:answers, "Answers") %></b>
     <div style="display: none;">
     <select class="answer_selection_type" name="answer_selection_type">
