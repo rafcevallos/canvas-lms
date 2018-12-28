@@ -121,6 +121,7 @@
         <a href="<%= context_url(@context, :context_quiz_quiz_question_url, @quiz.id, hash_get(question, :id, "{{ id }}")) %>" class="update_question_url">&nbsp;</a>
       <% end %>
       <span class="assessment_question_id"><%= hash_get(question, :assessment_question_id, nbsp) %></span>
+      <span class="standard_id"><%= hash_get(question, :standard_id) %></span>
     </div>
     <div class="text">
       <div class="original_question_text" style="display: none;">

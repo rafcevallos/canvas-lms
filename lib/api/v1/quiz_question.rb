@@ -36,6 +36,7 @@ module Api::V1::QuizQuestion
     question_text
     position
     points_possible
+    standard_id
     correct_comments
     incorrect_comments
     neutral_comments
