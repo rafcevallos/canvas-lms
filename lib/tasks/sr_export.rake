@@ -97,7 +97,7 @@ def quiz_sr_api_data(quiz)
                     :correct_answers => correct_answers(question),
                     :point_value => question[:points_possible],
                     :objective => {
-                        :objective_id => 0# todo
+                        :objective_id => question[:standard_id] || "" # todo: load the standard to get the ext_id
                     }
                 }
             }
