@@ -68,9 +68,6 @@ def quiz_sr_api_data(quiz)
     sr_id = sis_pseudonym.ext_id
     school_id = sis_pseudonym.school_id
 
-    puts quiz.inspect
-    puts (quiz.unlock_at or quiz.published_at)
-
     {
         :assessment_definition => {
             :external_assessment_id => 'CANVAS_' + quiz.id.to_s,
@@ -91,13 +88,15 @@ def quiz_sr_api_data(quiz)
                 :staff_member_id => sr_id
             },
             :questions => quiz.root_entries.map { |question|
+                standard = Standard.find_by(id: question[:standard_id].to_i)
+                standard_id = standard.nil? ? "" : standard[:ext_id]
                 {
                     :question_number => question[:position],
                     :question_name => question[:name],
                     :correct_answers => correct_answers(question),
                     :point_value => question[:points_possible],
                     :objective => {
-                        :objective_id => question[:standard_id] || "" # todo: load the standard to get the ext_id
+                        :objective_id => standard_id.to_s
                     }
                 }
             }
