@@ -83,7 +83,7 @@ def quiz_sr_api_data(quiz)
             },
             :section_periods => quiz.course.course_sections.map { |section| section.sis_source_id.to_i },
             :assessment_type => {
-                :assessment_type_id => 8 # TODO: Should everything be a weekly quiz?
+                :assessment_type_id => 8 # TODO: eventually everything won't be a weekly quiz
             },
             :staff_member => {
                 :staff_member_id => sr_id
@@ -111,6 +111,7 @@ namespace :sr do
 
     desc 'Export assessment data to SchoolRunner'
     task :export => :environment do
+        assessment_groups = {}
         quizzes = Quizzes::Quiz.where.not(published_at: nil)
                                .where.not(workflow_state: 'deleted')
 
@@ -124,10 +125,24 @@ namespace :sr do
                                     :basic_auth => {:username=>"984fc9c37dee56a4ee2e5f74ae891ec62423926b", :password=>""})
 
             json_response = JSON.parse(response.body)
-            assessment_id = json_response['results']['import_0']['assessment_definition']['assessment_id']
-            quiz[:sr_id] = assessment_id
-            quiz.save
+            if json_response['success']
+                assessment_id = json_response['results']['import_0']['assessment_definition']['assessment_id']
+                quiz[:sr_id] = assessment_id
+                quiz.save
+
+                unless assessment_groups.key?(quiz.quiz_title)
+                    assessment_groups[quiz.quiz_title] = []
+                end
+                assessment_groups[quiz.quiz_title].push assessment_id.to_i
+            end
         end
+
+        path_response = HTTParty.post("http://localhost:8000/dat-assessments/assessment-groups/configure",
+                                      :body => {
+                                          'groups' => assessment_groups
+                                      }.to_json,
+                                      :headers => { 'Content-Type' => 'application/json' })
+        puts path_response.inspect
 
         puts "Export complete"
     end
