@@ -1,5 +1,6 @@
 require 'httparty'
 require 'uri'
+require 'json'
 
 def char_from_answer_index(index)
     (index+65).chr
@@ -50,7 +51,7 @@ def compile_student_work(submissions, quiz)
 
             student_work.push({
                 :student => {
-                    :student_id => student_sis_pseudonym.ext_id
+                    :external_id => student_sis_pseudonym.sis_user_id
                 },
                 :score_override => submission.kept_score,
                 :submission_date => submission.finished_at.strftime('%Y-%m-%d'),
@@ -80,7 +81,7 @@ def quiz_sr_api_data(quiz)
             :course => {
                 :course_id => quiz.course.sis_source_id
             },
-            :section_periods => quiz.course.course_sections.map { |section| section.sis_source_id },
+            :section_periods => quiz.course.course_sections.map { |section| section.sis_source_id.to_i },
             :assessment_type => {
                 :assessment_type_id => 8 # TODO: Should everything be a weekly quiz?
             },
@@ -95,15 +96,14 @@ def quiz_sr_api_data(quiz)
                     :question_name => question[:name],
                     :correct_answers => correct_answers(question),
                     :point_value => question[:points_possible],
+                    :comment => "",
                     :objective => {
                         :objective_id => standard_id.to_s
                     }
                 }
             }
         },
-        :assessment_answers => [
-            compile_student_work(quiz.quiz_submissions, quiz)
-        ]
+        :assessment_answers => compile_student_work(quiz.quiz_submissions, quiz)
     }
 end
 
@@ -115,19 +115,18 @@ namespace :sr do
                                .where.not(workflow_state: 'deleted')
 
         for quiz in quizzes do
-            puts '>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>'
-            puts quiz_sr_api_data(quiz).inspect
-            puts '^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^'
+            quiz_data = quiz_sr_api_data(quiz)
 
-            # response = HTTParty.post("https://republic.sandbox.schoolrunner.org/api/v1/assessments/import",
-            #                         :body => {
-            #                             :assessment_data => data.to_json
-            #                         },
-            #                         :basic_auth => {:username=>"984fc9c37dee56a4ee2e5f74ae891ec62423926b", :password=>""})
+            response = HTTParty.post("https://republic.sandbox.schoolrunner.org/api/v1/assessments/import",
+                                    :body => {
+                                        :assessment_data => quiz_data.to_json
+                                    },
+                                    :basic_auth => {:username=>"984fc9c37dee56a4ee2e5f74ae891ec62423926b", :password=>""})
 
-            # puts response.code.to_s
-            # puts response.headers.to_s
-            # puts response.body.to_s
+            json_response = JSON.parse(response.body)
+            assessment_id = json_response['results']['import_0']['assessment_definition']['assessment_id']
+            quiz[:sr_id] = assessment_id
+            quiz.save
         end
 
         puts "Export complete"
