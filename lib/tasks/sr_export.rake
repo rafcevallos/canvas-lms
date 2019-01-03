@@ -137,7 +137,7 @@ namespace :sr do
             end
         end
 
-        path_response = HTTParty.post("http://localhost:8000/dat-assessments/assessment-groups/configure",
+        path_response = HTTParty.post(ENV['PATH_URL'] + "/dat-assessments/assessment-groups/configure",
                                       :body => {
                                           'groups' => assessment_groups
                                       }.to_json,
