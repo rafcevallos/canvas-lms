@@ -89,7 +89,7 @@ class Login::OauthBaseController < ApplicationController
 
       successful_login(pseudonym.user, pseudonym)
     else
-      unknown_user_url = @domain_root_account.unknown_user_url.presence || login_url
+      unknown_user_url = @domain_root_account.unknown_user_url.presence || auth_url
       logger.warn "Received OAuth2 login for unknown user: #{unique_ids.inspect}, redirecting to: #{unknown_user_url}."
       flash[:delegated_message] = t "Canvas doesn't have an account for user: %{user}", :user => unique_ids.first
       redirect_to unknown_user_url
