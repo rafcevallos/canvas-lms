@@ -1385,7 +1385,7 @@ const lockedItems = lockManager.isChildContent() ? lockManager.getItemLocks() : 
     $list.each(function(i) {
       var $question = $(this);
       var questionData = $question.getTemplateData({
-        textValues: ['question_name', 'question_points', 'question_type', 'answer_selection_type', 'assessment_question_id', 'correct_comments', 'incorrect_comments', 'neutral_comments', 'matching_answer_incorrect_matches', 'equation_combinations', 'equation_formulas', 'regrade_option', 'standard_id'],
+        textValues: ['question_name', 'question_points', 'question_type', 'answer_selection_type', 'assessment_question_id', 'correct_comments', 'incorrect_comments', 'neutral_comments', 'matching_answer_incorrect_matches', 'equation_combinations', 'equation_formulas', 'regrade_option', 'standard_group_id'],
         htmlValues: ['question_text', 'text_before_answers', 'text_after_answers', 'correct_comments_html', 'incorrect_comments_html', 'neutral_comments_html']
       });
       questionData = $.extend(questionData, $question.find(".original_question_text").getFormData());
@@ -1498,7 +1498,7 @@ const lockedItems = lockManager.isChildContent() ? lockManager.getItemLocks() : 
       q.variables = question.variables;
       q.answer_tolerance = question.answer_tolerance;
       q.formula_decimal_places = question.formula_decimal_places;
-      q.standard_id = question.standard_id;
+      q.standard_id = question.standard_group_id;
 
       q.answers = question.answers;
       data.questions.push(q);
@@ -2096,7 +2096,7 @@ const lockedItems = lockManager.isChildContent() ? lockManager.getItemLocks() : 
       var question = $question.getTemplateData({
         textValues: ['question_type', 'correct_comments', 'incorrect_comments', 'neutral_comments',
                      'question_name', 'question_points', 'answer_selection_type', 'blank_id',
-                     'matching_answer_incorrect_matches', 'regrade_option', 'regrade_disabled', 'standard_id'],
+                     'matching_answer_incorrect_matches', 'regrade_option', 'regrade_disabled', 'standard_group_id'],
         htmlValues: ['question_text', 'correct_comments_html', 'incorrect_comments_html', 'neutral_comments_html']
       });
       question.question_text = $question.find("textarea[name='question_text']").val();
@@ -2990,7 +2990,7 @@ const lockedItems = lockManager.isChildContent() ? lockManager.getItemLocks() : 
       var questionData = $question.getFormData({
         textValues: ['question_type', 'question_name', 'question_points', 'correct_comments', 'incorrect_comments', 'neutral_comments',
           'question_text', 'answer_selection_type', 'text_after_answers', 'matching_answer_incorrect_matches',
-          'regrade_option', 'regrade_disabled', 'standard_id'],
+          'regrade_option', 'regrade_disabled', 'standard_group_id'],
         htmlValues: ['correct_comments_html', 'incorrect_comments_html', 'neutral_comments_html']
       });
 

@@ -80,7 +80,7 @@ class Quizzes::QuizQuestion::QuestionData
     question[:question_text] = fields.sanitize(fields.fetch_with_enforced_length(:question_text, default: I18n.t(:default_question_text, "Question text")))
     question[:answers] = fields.fetch_any(:answers, [])
     question[:text_after_answers] = fields.fetch_any(:text_after_answers)
-    question[:standard_id] = fields.fetch_any(:standard_id)
+    question[:standard_group_id] = fields.fetch_any(:standard_group_id)
 
     if question.is_type?(:calculated)
       question[:formulas] = fields.fetch_any(:formulas, [])
