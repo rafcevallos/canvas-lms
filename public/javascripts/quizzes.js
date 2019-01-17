@@ -1498,7 +1498,7 @@ const lockedItems = lockManager.isChildContent() ? lockManager.getItemLocks() : 
       q.variables = question.variables;
       q.answer_tolerance = question.answer_tolerance;
       q.formula_decimal_places = question.formula_decimal_places;
-      q.standard_id = question.standard_group_id;
+      q.standard_group_id = question.standard_group_id;
 
       q.answers = question.answers;
       data.questions.push(q);
