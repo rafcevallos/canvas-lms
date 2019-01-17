@@ -1,0 +1,2 @@
+class StandardGroup < ApplicationRecord
+end
