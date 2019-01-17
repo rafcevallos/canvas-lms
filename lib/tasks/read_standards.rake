@@ -10,7 +10,6 @@ namespace :standards do
         if course.nil?
             puts 'Unable to find course "' + course_code + '"'
         else
-            school_id = ENV['school']
             # Expects the standard csv to have the headers: ext_id, code, description, school_id
             CSV.foreach(ENV['filepath'], {:headers => true, :header_converters => :symbol}) do |row|
                 standard = Standard.find_by(ext_id: row[:ext_id])
