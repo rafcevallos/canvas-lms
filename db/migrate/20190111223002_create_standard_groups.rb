@@ -9,7 +9,6 @@ class CreateStandardGroups < ActiveRecord::Migration[5.1]
       t.timestamps
     end
 
-    add_column :standards, :standard_group_id, :integer
     add_foreign_key :standards, :standard_groups
   end
 end
