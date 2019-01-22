@@ -34,7 +34,7 @@ class AuthenticationProvider::Delegated < AuthenticationProvider
     primary_auth = account.authentication_providers.active.first
     if primary_auth.is_a?(AuthenticationProvider::Canvas) ||
       primary_auth.is_a?(AuthenticationProvider::LDAP)
-      return controller.login_url
+      return controller.auth_url
     end
     # otherwise, just go to a landing page
     controller.logout_url

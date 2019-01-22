@@ -68,7 +68,7 @@ If no discovery URL is configured, the first configuration will be used to attem
             <%= f.label :unknown_user_url, t("Unknown User URL"),
                         class: 'ic-Label' %>
             <%= f.text_field :unknown_user_url,
-                             placeholder: login_url,
+                             placeholder: auth_url,
                              :class => 'ic-Input',
                              'aria-describedby' => 'unknown_user_url_description' %>
             <div class="ic-Form-help-text" id="unknown_user_url_description">
