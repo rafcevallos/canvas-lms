@@ -343,6 +343,8 @@ class Quizzes::QuizzesController < ApplicationController
       conditional_release_js_env(@quiz.assignment)
       set_master_course_js_env_data(@quiz, @context)
 
+      @standard_groups = StandardGroup.joins(:standards).merge(Standard.where(:course => @context).order(:code))
+
       render :new
     end
   end
