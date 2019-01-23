@@ -317,7 +317,7 @@ module AuthenticationMethods
       format.all do
         store_location
         flash[:warning] = I18n.t('lib.auth.errors.not_authenticated', "You must be logged in to access this page") unless request.path == '/'
-        redirect_to login_url(params.permit(:canvas_login, :authentication_provider))
+        redirect_to auth_url(params.permit(:canvas_login, :authentication_provider))
       end
     end
   end

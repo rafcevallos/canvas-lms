@@ -703,64 +703,64 @@ CanvasRails::Application.routes.draw do
   get 'grades' => 'users#grades'
   get 'grades_for_student' => 'users#grades_for_student'
 
-  get 'login' => 'login#new'
-  get 'login/session_token' => 'login#session_token'
+  get 'auth' => 'login#new'
+  get 'auth/session_token' => 'login#session_token'
   delete 'logout' => 'login#destroy'
   get 'logout' => 'login#logout_landing'
 
-  get 'login/canvas' => 'login/canvas#new', as: :canvas_login
+  get 'auth/canvas' => 'login/canvas#new', as: :canvas_login
   post 'login/canvas' => 'login/canvas#create'
 
-  get 'login/ldap' => 'login/ldap#new'
+  get 'auth/ldap' => 'login/ldap#new'
   post 'login/ldap' => 'login/ldap#create'
 
-  get 'login/cas' => 'login/cas#new'
-  get 'login/cas/:id' => 'login/cas#new', as: :cas_login
+  get 'auth/cas' => 'login/cas#new'
+  get 'auth/cas/:id' => 'login/cas#new', as: :cas_login
   post 'login/cas' => 'login/cas#destroy', as: :cas_logout
   post 'login/cas/:id' => 'login/cas#destroy'
 
-  get 'login/saml' => 'login/saml#new'
-  get 'login/saml/logout' => 'login/saml#destroy'
+  get 'auth/saml' => 'login/saml#new'
+  get 'auth/saml/logout' => 'login/saml#destroy'
   # deprecated alias
   get 'saml_logout' => 'login/saml#destroy'
-  get 'login/saml/:id' => 'login/saml#new', as: :saml_login
+  get 'auth/saml/:id' => 'login/saml#new', as: :saml_login
   get 'saml_observee' => 'login/saml#observee_validation', as: :saml_observee
   post 'login/saml' => 'login/saml#create'
   # deprecated alias; no longer advertised
   post 'saml_consume' => 'login/saml#create'
 
   # the callback URL for all OAuth1.0a based SSO
-  get 'login/oauth/callback' => 'login/oauth#create', as: :oauth_login_callback
+  get 'auth/oauth/callback' => 'login/oauth#create', as: :oauth_login_callback
   # the callback URL for all OAuth2 based SSO
-  get 'login/oauth2/callback' => 'login/oauth2#create', as: :oauth2_login_callback
+  get 'auth/oauth2/callback' => 'login/oauth2#create', as: :oauth2_login_callback
   # ActionController::TestCase can't deal with aliased controllers when finding
   # routes, so we let this route exist only for tests
-  get 'login/oauth2' => 'login/oauth2#new' if Rails.env.test?
+  get 'auth/oauth2' => 'login/oauth2#new' if Rails.env.test?
 
-  get 'login/clever' => 'login/clever#new', as: :clever_login
+  get 'auth/clever' => 'login/clever#new', as: :clever_login
   # Clever gets their own callback, cause we have to add additional processing
   # for their Instant Login feature
-  get 'login/clever/callback' => 'login/clever#create', as: :clever_callback
-  get 'login/clever/:id' => 'login/clever#new'
-  get 'login/facebook' => 'login/facebook#new', as: :facebook_login
-  get 'login/github' => 'login/github#new', as: :github_login
-  get 'login/google' => 'login/google#new', as: :google_login
-  get 'login/google/:id' => 'login/google#new'
-  get 'login/linkedin' => 'login/linkedin#new', as: :linkedin_login
-  get 'login/microsoft' => 'login/microsoft#new'
-  get 'login/microsoft/:id' => 'login/microsoft#new', as: :microsoft_login
-  get 'login/openid_connect' => 'login/openid_connect#new'
-  get 'login/openid_connect/:id' => 'login/openid_connect#new', as: :openid_connect_login
-  get 'login/twitter' => 'login/twitter#new', as: :twitter_login
+  get 'auth/clever/callback' => 'login/clever#create', as: :clever_callback
+  get 'auth/clever/:id' => 'login/clever#new'
+  get 'auth/facebook' => 'login/facebook#new', as: :facebook_login
+  get 'auth/github' => 'login/github#new', as: :github_login
+  get 'auth/google' => 'login/google#new', as: :google_login
+  get 'auth/google/:id' => 'login/google#new'
+  get 'auth/linkedin' => 'login/linkedin#new', as: :linkedin_login
+  get 'auth/microsoft' => 'login/microsoft#new'
+  get 'auth/microsoft/:id' => 'login/microsoft#new', as: :microsoft_login
+  get 'auth/openid_connect' => 'login/openid_connect#new'
+  get 'auth/openid_connect/:id' => 'login/openid_connect#new', as: :openid_connect_login
+  get 'auth/twitter' => 'login/twitter#new', as: :twitter_login
 
-  get 'login/otp' => 'login/otp#new', as: :otp_login
+  get 'auth/otp' => 'login/otp#new', as: :otp_login
   post 'login/otp/sms' => 'login/otp#send_via_sms', as: :send_otp_via_sms
   post 'login/otp' => 'login/otp#create'
   get 'users/self/otps' => 'one_time_passwords#index', as: :one_time_passwords
   delete 'users/self/otps' => 'one_time_passwords#destroy_all', as: :destroy_all_one_time_passwords
 
   # deprecated redirect
-  get 'login/:id' => 'login#new'
+  get 'auth/:id' => 'login#new'
 
   delete 'users/:user_id/mfa' => 'login/otp#destroy', as: :disable_mfa
   get 'file_session/clear' => 'login#clear_file_session', as: :clear_file_session
@@ -2111,11 +2111,11 @@ CanvasRails::Application.routes.draw do
   # system, so we can't put it in the api uri namespace.
   post 'files_api' => 'files#api_create', as: :api_v1_files_create
 
-  get 'login/oauth2/auth' => 'oauth2_provider#auth', as: :oauth2_auth
+  get 'auth/oauth2/auth' => 'oauth2_provider#auth', as: :oauth2_auth
   post 'login/oauth2/token' => 'oauth2_provider#token', as: :oauth2_token
-  get 'login/oauth2/confirm' => 'oauth2_provider#confirm', as: :oauth2_auth_confirm
+  get 'auth/oauth2/confirm' => 'oauth2_provider#confirm', as: :oauth2_auth_confirm
   post 'login/oauth2/accept' => 'oauth2_provider#accept', as: :oauth2_auth_accept
-  get 'login/oauth2/deny' => 'oauth2_provider#deny', as: :oauth2_auth_deny
+  get 'auth/oauth2/deny' => 'oauth2_provider#deny', as: :oauth2_auth_deny
   delete 'login/oauth2/token' => 'oauth2_provider#destroy', as: :oauth2_logout
 
   ApiRouteSet.draw(self, "/api/lti/v1") do
