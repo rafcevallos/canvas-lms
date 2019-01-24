@@ -68,6 +68,9 @@ def quiz_sr_api_data(quiz)
     sis_pseudonym = SisPseudonym.for(teacher, LoadAccount.default_domain_root_account, type: :implicit, require_sis: false)
     sr_id = sis_pseudonym.ext_id
     school_id = sis_pseudonym.school_id
+    section_period_ids = quiz.course.course_sections.each.map { |section|
+        section[:section_period_ids]
+    }.join(',')
 
     {
         :assessment_definition => {
@@ -81,7 +84,7 @@ def quiz_sr_api_data(quiz)
             :course => {
                 :course_id => quiz.course.sis_source_id
             },
-            :section_periods => quiz.course.course_sections.map { |section| section.sis_source_id.to_i },
+            :section_periods => section_period_ids,
             :assessment_type => {
                 :assessment_type_id => 8 # TODO: eventually everything won't be a weekly quiz
             },
@@ -89,7 +92,7 @@ def quiz_sr_api_data(quiz)
                 :staff_member_id => sr_id
             },
             :questions => quiz.root_entries.map { |question|
-                standard = Standard.find_by(id: question[:standard_id].to_i)
+                standard = Standard.find_by(standard_group_id: question[:standard_group_id].to_i, school_id: school_id)
                 standard_id = standard.nil? ? "" : standard[:ext_id]
                 {
                     :question_number => question[:position],

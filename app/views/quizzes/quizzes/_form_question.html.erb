@@ -134,10 +134,10 @@
       <textarea style="width: 90%; height: 120px;" class="question_content" name="question_text"></textarea>
     </div>
     <label>Standard:</label>
-    <select name="standard_id" class="standard_id">
+    <select name="standard_group_id" class="standard_group_id">
         <option value="">None</option>
-        <% @standards.each do |standard| %>
-            <option value="<%= standard[:id] %>"><%= standard[:code] %> - <%= (standard[:description] || '').truncate(30) %></option>
+        <% @standard_groups.each do |standard_group| %>
+            <option value="<%= standard_group[:id] %>"><%= standard_group[:code] %> - <%= (standard_group[:description] || '').truncate(30) %></option>
         <% end %>
     </select>
     <div class="clear"></div>

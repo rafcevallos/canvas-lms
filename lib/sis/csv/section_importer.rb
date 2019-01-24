@@ -44,7 +44,7 @@ module SIS
             end
 
             begin
-              importer.add_section(row['section_id'], row['course_id'], row['name'], row['status'], start_date, end_date, row['integration_id'])
+              importer.add_section(row['section_id'], row['course_id'], row['name'], row['status'], start_date, end_date, row['integration_id'], row['section_period_ids'])
             rescue ImportError => e
               SisBatch.add_error(csv, e.to_s, sis_batch: @batch, row: row['lineno'], row_info: row)
             end

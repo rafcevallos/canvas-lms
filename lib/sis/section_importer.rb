@@ -71,7 +71,7 @@ module SIS
         @deleted_section_ids = Set.new
       end
 
-      def add_section(section_id, course_id, name, status, start_date=nil, end_date=nil, integration_id=nil)
+      def add_section(section_id, course_id, name, status, start_date=nil, end_date=nil, integration_id=nil, section_period_ids=nil)
         @logger.debug("Processing Section #{[section_id, course_id, name, status, start_date, end_date].inspect}")
 
         raise ImportError, "No section_id given for a section in course #{course_id}" if section_id.blank?
@@ -91,6 +91,7 @@ module SIS
 
         # only update the name on new records, and ones that haven't been changed since the last sis import
         section.name = name if section.new_record? || !section.stuck_sis_fields.include?(:name)
+        section.section_period_ids = section_period_ids
 
         # update the course id if necessary
         if section.course_id != course.id
