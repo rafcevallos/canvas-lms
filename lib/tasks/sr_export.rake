@@ -145,7 +145,6 @@ namespace :sr do
                                           'groups' => assessment_groups
                                       }.to_json,
                                       :headers => { 'Content-Type' => 'application/json' })
-        puts path_response.inspect
 
         puts "Export complete"
     end
