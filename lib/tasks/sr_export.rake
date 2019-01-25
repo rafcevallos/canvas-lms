@@ -121,7 +121,7 @@ namespace :sr do
         for quiz in quizzes do
             quiz_data = quiz_sr_api_data(quiz)
 
-            response = HTTParty.post("https://republic.sandbox.schoolrunner.org/api/v1/assessments/import",
+            response = HTTParty.post(ENV['SR_URL'] + "/api/v1/assessments/import",
                                     :body => {
                                         :assessment_data => quiz_data.to_json
                                     },

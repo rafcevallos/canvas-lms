@@ -69,4 +69,5 @@ environment_configuration(defined?(config) && config) do |config|
   Dir[File.dirname(__FILE__) + "/" + File.basename(__FILE__, ".rb") + "-*.rb"].each { |localfile| eval(File.new(localfile).read, nil, localfile, 1) }
 
   ENV['PATH_URL'] = 'http://localhost:8000'
+  ENV['SR_URL'] = 'https://republic.sandbox.schoolrunner.org'
 end
