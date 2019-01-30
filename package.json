@@ -67,6 +67,7 @@
     "md5": "^2.2.1",
     "mediaelement": "https://github.com/instructure/mediaelement.git#master",
     "moment": "~2.10.6",
+    "natives": "1.1.6",
     "normalize-scroll-left": "^0.1.2",
     "page": "visionmedia/page.js#1.6.4",
     "parse-decimal-number": "1.0.0",
@@ -239,10 +240,8 @@
     "moment": "2.10.6",
     "canvas-rce/**/babel-helper-evaluate-path": "0.4.1",
     "canvas-quizzes/grunt-contrib-jasmine/jasmine-core": "2.6.4",
-    "graphael": "this is just here so yarn.lock looks the same whether the analytics plugin is checked out or not",
     "graphael": "https://github.com/ryankshaw/graphael.git",
     "karma": "2.0.2",
-    "node-sass": "if we let node-sass upgrade to recent versions, it causes: SIS-3125",
     "node-sass": "4.7.2"
   }
 }

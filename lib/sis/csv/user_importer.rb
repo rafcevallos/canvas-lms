@@ -60,6 +60,8 @@ module SIS
           short_name: row['short_name'],
           full_name: row['full_name'],
           sortable_name: row['sortable_name'],
+          school_id: row['school_id'],
+          ext_id: row['ext_id'],
           lineno: row['lineno'],
           csv: csv,
           authentication_provider_id: row['authentication_provider_id']
