@@ -69,4 +69,7 @@ environment_configuration(defined?(config) && config) do |config|
 
   # eval <env>-local.rb if it exists
   Dir[File.dirname(__FILE__) + "/" + File.basename(__FILE__, ".rb") + "-*.rb"].each { |localfile| eval(File.new(localfile).read, nil, localfile, 1) }
+
+  ENV['PATH_URL'] = 'https://path.republic.school'
+  ENV['SR_URL'] = 'https://republic.schoolrunner.org'
 end

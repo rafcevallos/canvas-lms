@@ -114,23 +114,37 @@ namespace :sr do
 
     desc 'Export assessment data to SchoolRunner'
     task :export => :environment do
+        assessment_groups = {}
         quizzes = Quizzes::Quiz.where.not(published_at: nil)
                                .where.not(workflow_state: 'deleted')
 
         for quiz in quizzes do
             quiz_data = quiz_sr_api_data(quiz)
 
-            response = HTTParty.post("https://republic.sandbox.schoolrunner.org/api/v1/assessments/import",
+            response = HTTParty.post(ENV['SR_URL'] + "/api/v1/assessments/import",
                                     :body => {
                                         :assessment_data => quiz_data.to_json
                                     },
                                     :basic_auth => {:username=>"984fc9c37dee56a4ee2e5f74ae891ec62423926b", :password=>""})
 
             json_response = JSON.parse(response.body)
-            assessment_id = json_response['results']['import_0']['assessment_definition']['assessment_id']
-            quiz[:sr_id] = assessment_id
-            quiz.save
+            if json_response['success']
+                assessment_id = json_response['results']['import_0']['assessment_definition']['assessment_id']
+                quiz[:sr_id] = assessment_id
+                quiz.save
+
+                unless assessment_groups.key?(quiz.quiz_title)
+                    assessment_groups[quiz.quiz_title] = []
+                end
+                assessment_groups[quiz.quiz_title].push assessment_id.to_i
+            end
         end
+
+        path_response = HTTParty.post(ENV['PATH_URL'] + "/dat-assessments/assessment-groups/configure",
+                                      :body => {
+                                          'groups' => assessment_groups
+                                      }.to_json,
+                                      :headers => { 'Content-Type' => 'application/json' })
 
         puts "Export complete"
     end
