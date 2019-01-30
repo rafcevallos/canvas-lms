@@ -1409,7 +1409,7 @@ class CoursesController < ApplicationController
       session[:return_to] = course_url(@context.id)
       flash[:notice] = t('notices.login_to_accept', "You'll need to log in before you can accept the enrollment.")
       return redirect_to login_url(:force_login => 1) if @current_user
-      redirect_to login_url
+      redirect_to auth_url
     else
       # defer to CommunicationChannelsController#confirm for the logic of merging users
       redirect_to registration_confirmation_path(enrollment.user.email_channel.confirmation_code, :enrollment => enrollment.uuid)
