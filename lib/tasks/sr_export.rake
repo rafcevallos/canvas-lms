@@ -39,7 +39,7 @@ def compile_submission_answers(submission, quiz)
         {
             :question_number => index + 1,
             :answer => answer,
-            :points => question_answer ? question_answer[:points] : ''
+            :points => question_answer ? question_answer[:points] : 0
         }
     }
 end
