@@ -104,7 +104,7 @@ class LoginController < ApplicationController
       redirect = aac.try(:user_logout_redirect, self, @current_user)
     end
 
-    redirect ||= login_url
+    redirect ||= auth_url
     logout_current_user
 
     flash[:logged_out] = true
