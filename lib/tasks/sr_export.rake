@@ -22,11 +22,12 @@ def compile_submission_answers(submission, quiz)
     quiz.root_entries.each_with_index.map { |question, index|
         answer = ''
         question_answer = submission[:submission_data].find {|answer| answer[:question_id] == question[:id]}
-        if question_answer
+        answered_question = submission[:quiz_data][index]
+        if question_answer && question_answer.key?(:answer_id)
             if question[:question_type] == 'multiple_choice_question'
-                answer = char_from_answer_index(question[:answers].index {|answer| answer[:id] == question_answer[:answer_id] })
+                answer = char_from_answer_index(answered_question[:answers].index {|answer| answer[:id] == question_answer[:answer_id] })
             elsif question[:question_type] == 'multiple_answers_question'
-                answer = question[:answers].each_with_index.map { |answer, index|
+                answer = answered_question[:answers].each_with_index.map { |answer, index|
                     if question_answer && question_answer[('answer_' + answer[:id].to_s).to_sym] == "1"
                         char_from_answer_index(index)
                     else
@@ -53,7 +54,7 @@ def compile_student_work(submissions, quiz)
                 :student => {
                     :external_id => student_sis_pseudonym.sis_user_id
                 },
-                :score_override => submission.kept_score,
+                :score_override => '',
                 :submission_date => submission.finished_at.strftime('%Y-%m-%d'),
                 :answers => compile_submission_answers(submission, quiz)
             })
@@ -82,7 +83,7 @@ def quiz_sr_api_data(quiz)
             },
             :students_active => 1,
             :course => {
-                :course_id => quiz.course.sis_source_id
+                :course_id => quiz.course.sr_id
             },
             :section_periods => section_period_ids,
             :assessment_type => {

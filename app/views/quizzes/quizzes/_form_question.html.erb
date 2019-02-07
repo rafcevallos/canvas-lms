@@ -136,7 +136,7 @@
     <label>Standard:</label>
     <select name="standard_group_id" class="standard_group_id">
         <option value="">None</option>
-        <% @standard_groups.each do |standard_group| %>
+        <% Array(@standard_groups).each do |standard_group| %>
             <option value="<%= standard_group[:id] %>"><%= standard_group[:code] %> - <%= (standard_group[:description] || '').truncate(30) %></option>
         <% end %>
     </select>
