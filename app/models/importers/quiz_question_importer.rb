@@ -31,6 +31,7 @@ module Importers
       hash[:position] = position
       hash[:points_possible] = qq_hash[:points_possible] if qq_hash[:points_possible]
       hash[:points_possible] = 0 if hash[:points_possible].to_f < 0
+      hash[:standard_group_id] = aq_hash[:standard_group_id]
 
       mig_id = qq_hash['quiz_question_migration_id'] || qq_hash['migration_id']
 

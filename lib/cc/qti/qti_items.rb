@@ -109,12 +109,14 @@ module CC
             meta_node.qtimetadata do |qm_node|
               if for_cc
                 meta_field(qm_node, 'cc_profile', CC_TYPE_PROFILES[question['question_type']])
+                meta_field(qm_node, 'standard_group_id', question['standard_group_id'])
                 if question['question_type'] == 'essay_question'
                   meta_field(qm_node, 'qmd_computerscored', 'No')
                 end
               else
                 meta_field(qm_node, 'question_type', question['question_type'])
                 meta_field(qm_node, 'points_possible', question['points_possible'])
+                meta_field(qm_node, 'standard_group_id', question['standard_group_id'])
                 if question[:is_quiz_question]
                   meta_field(qm_node, 'assessment_question_identifierref', aq_mig_id(question))
                 end

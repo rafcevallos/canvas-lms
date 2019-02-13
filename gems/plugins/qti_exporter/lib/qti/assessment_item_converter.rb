@@ -182,6 +182,9 @@ class AssessmentItemConverter
       if score = get_node_att(meta, 'instructureField[name=points_possible]', 'value')
         @question[:points_possible] = [score.to_f, 0.0].max
       end
+      if standard_group_id = get_node_att(meta, 'instructureField[name=standard_group_id]', 'value')
+        @question[:standard_group_id] = standard_group_id
+      end
       if ref = get_node_att(meta, 'instructureField[name=assessment_question_identifierref]', 'value')
         @question[:assessment_question_migration_id] = ref
       end
