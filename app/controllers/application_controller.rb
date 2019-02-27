@@ -524,7 +524,7 @@ class ApplicationController < ActionController::Base
       return render plain: "Please finish logging in", status: 403 if request.xhr?
 
       reset_session
-      redirect_to login_url
+      redirect_to auth_url
     end
   end
 
@@ -581,7 +581,7 @@ class ApplicationController < ActionController::Base
     if session[:used_remember_me_token]
       flash[:warning] = t "#application.warnings.please_log_in", "For security purposes, please enter your password to continue"
       store_location
-      redirect_to login_url
+      redirect_to auth_url
       return false
     end
     true
@@ -661,7 +661,7 @@ class ApplicationController < ActionController::Base
     if !@context
       if @context_is_current_user
         store_location
-        redirect_to login_url
+        redirect_to auth_url
       elsif params[:context_id]
         raise ActiveRecord::RecordNotFound.new("Cannot find #{params[:context_type] || 'Context'} for ID: #{params[:context_id]}")
       else
@@ -1366,7 +1366,7 @@ class ApplicationController < ActionController::Base
       message = exception.xhr_message if exception.respond_to?(:xhr_message)
       render_xhr_exception(error, message, status, status_code)
     elsif exception.is_a?(ActionController::InvalidAuthenticityToken) && cookies[:_csrf_token].blank?
-      redirect_to login_url(needs_cookies: '1')
+      redirect_to auth_url(needs_cookies: '1')
       reset_session
       return
     else

@@ -57,13 +57,13 @@ class Login::OauthBaseController < ApplicationController
                            account_id: @aac.global_account_id)
     flash[:delegated_message] = t("There was a problem logging in at %{institution}",
                                   institution: @domain_root_account.display_name)
-    redirect_to login_url
+    redirect_to auth_url
     false
   end
 
   def find_pseudonym(unique_ids, provider_attributes = {})
     if unique_ids.nil?
-      unknown_user_url = @domain_root_account.unknown_user_url.presence || login_url
+      unknown_user_url = @domain_root_account.unknown_user_url.presence || auth_url
       logger.warn "Received OAuth2 login with no unique_id"
       flash[:delegated_message] =
           t("Authentication with %{provider} was successful, but no unique ID for logging in to Canvas was provided.",

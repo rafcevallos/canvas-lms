@@ -47,7 +47,7 @@ class Login::Oauth2Controller < Login::OauthBaseController
   def validate_request
     if params[:error_description]
       flash[:delegated_message] = Sanitize.clean(params[:error_description])
-      redirect_to login_url
+      redirect_to auth_url
       return false
     end
 
@@ -57,7 +57,7 @@ class Login::Oauth2Controller < Login::OauthBaseController
       end
     rescue Canvas::Security::TokenExpired
       flash[:delegated_message] = t("It took too long to login. Please try again")
-      redirect_to login_url
+      redirect_to auth_url
       return false
     end
 
