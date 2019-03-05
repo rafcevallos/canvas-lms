@@ -76,8 +76,10 @@ def quiz_sr_api_data(quiz)
     }.map { |section|
         puts "map " + section.inspect
         section[:section_period_ids]
-    }.join(',')
-    
+    }.join(',').split(',').map { |section_period|
+        section_period.to_i
+    }
+
     puts('SECTION PERIOD IDS: ', section_period_ids.to_s)
 
     {

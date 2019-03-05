@@ -25,5 +25,7 @@ group :development do
   # Set this option in your dev environment to disable.
   unless ENV['DISABLE_RUBY_DEBUGGING']
     gem 'byebug', '10.0.2', platform: :mri
+    gem 'ruby-debug-ide'
+    gem 'debase'
   end
 end
