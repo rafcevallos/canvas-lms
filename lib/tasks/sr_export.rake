@@ -76,7 +76,7 @@ def quiz_sr_api_data(quiz)
     }.join(',').split(',').map { |section_period|
         section_period.to_i
     }
-
+    puts('SECTION PERIOD IDs: ', section_period_ids.to_s)
     {
         :assessment_definition => {
             :external_assessment_id => 'CANVAS_' + quiz.id.to_s,
