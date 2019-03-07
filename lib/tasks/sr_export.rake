@@ -69,9 +69,13 @@ def quiz_sr_api_data(quiz)
     sis_pseudonym = SisPseudonym.for(teacher, LoadAccount.default_domain_root_account, type: :implicit, require_sis: false)
     sr_id = sis_pseudonym.ext_id
     school_id = sis_pseudonym.school_id
-    section_period_ids = quiz.course.course_sections.each.map { |section|
+    section_period_ids = quiz.course.course_sections.each.reject { |section|
+        section[:section_period_ids].blank?
+    }.map { |section|
         section[:section_period_ids]
-    }.join(',')
+    }.join(',').split(',').map { |section_period|
+        section_period.to_i
+    }
 
     {
         :assessment_definition => {
@@ -141,11 +145,11 @@ namespace :sr do
             end
         end
 
-        path_response = HTTParty.post(ENV['PATH_URL'] + "/dat-assessments/assessment-groups/configure",
-                                      :body => {
-                                          'groups' => assessment_groups
-                                      }.to_json,
-                                      :headers => { 'Content-Type' => 'application/json' })
+        # path_response = HTTParty.post(ENV['PATH_URL'] + "/dat-assessments/assessment-groups/configure",
+        #                               :body => {
+        #                                   'groups' => assessment_groups
+        #                               }.to_json,
+        #                               :headers => { 'Content-Type' => 'application/json' })
 
         puts "Export complete"
     end
