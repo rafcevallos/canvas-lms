@@ -70,14 +70,13 @@ def quiz_sr_api_data(quiz)
     sr_id = sis_pseudonym.ext_id
     school_id = sis_pseudonym.school_id
     section_period_ids = quiz.course.course_sections.each.reject { |section|
-        # !(section[:section_period_ids].empty? && section[:section_period_ids].nil?)
         section[:section_period_ids].blank?
     }.map { |section|
         section[:section_period_ids]
     }.join(',').split(',').map { |section_period|
         section_period.to_i
     }
-    puts('SECTION PERIOD IDS', section_period_ids.to_s)
+
     {
         :assessment_definition => {
             :external_assessment_id => 'CANVAS_' + quiz.id.to_s,
@@ -126,7 +125,7 @@ namespace :sr do
 
         for quiz in quizzes do
             quiz_data = quiz_sr_api_data(quiz)
-            puts('QUIZ DATA', quiz_data.inspect)
+
             response = HTTParty.post(ENV['SR_URL'] + "/api/v1/assessments/import",
                                     :body => {
                                         :assessment_data => quiz_data.to_json
