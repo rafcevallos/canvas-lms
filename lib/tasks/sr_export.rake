@@ -65,6 +65,9 @@ def compile_student_work(submissions, quiz)
 end
 
 def quiz_sr_api_data(quiz)
+    # puts('QUIZ', quiz.quiz_data.each.reject { |type|
+    #     type[:question_type] == 'text_only_question'
+    # })
     teacher = quiz.course.teachers.first
     sis_pseudonym = SisPseudonym.for(teacher, LoadAccount.default_domain_root_account, type: :implicit, require_sis: false)
     sr_id = sis_pseudonym.ext_id
@@ -76,7 +79,11 @@ def quiz_sr_api_data(quiz)
     }.join(',').split(',').map { |section_period|
         section_period.to_i
     }
-    puts('SECTION PERIOD IDs: ', section_period_ids.to_s)
+    used_question_types = quiz.root_entries.reject { |q|
+        q[:question_type] == 'text_only_question'
+    }
+    puts('USED QUESTION TYPE', used_question_types)
+    # puts('SECTION PERIOD IDs: ', section_period_ids.to_s)
     {
         :assessment_definition => {
             :external_assessment_id => 'CANVAS_' + quiz.id.to_s,
@@ -96,12 +103,15 @@ def quiz_sr_api_data(quiz)
             :staff_member => {
                 :staff_member_id => sr_id
             },
-            :questions => quiz.root_entries.map { |question|
+            :questions => quiz.root_entries.reject { |question|
+                question[:question_type] == 'text_only_question'
+            }.map { |question|
                 standard = Standard.find_by(standard_group_id: question[:standard_group_id].to_i, school_id: school_id)
                 standard_id = standard.nil? ? "" : standard[:ext_id]
                 {
                     :question_number => question[:position],
-                    :question_name => question[:name],
+                    :question_name => question[:question_name],
+                    :question_type => question[:question_type],
                     :correct_answers => correct_answers(question),
                     :point_value => question[:points_possible],
                     :comment => "",
@@ -120,13 +130,16 @@ namespace :sr do
     desc 'Export assessment data to SchoolRunner'
     task :export => :environment do
         assessment_groups = {}
-        quizzes = Quizzes::Quiz.where.not(published_at: nil)
-                               .where.not(workflow_state: 'deleted')
-
+        # quizzes = Quizzes::Quiz.where.not(published_at: nil)
+        #                        .where.not(workflow_state: 'deleted')
+        quizzes = Quizzes::Quiz.find([27, 28])
         for quiz in quizzes do
             quiz_data = quiz_sr_api_data(quiz)
 
-            response = HTTParty.post(ENV['SR_URL'] + "/api/v1/assessments/import",
+            puts('QUIZ DATA: ', quiz_data.inspect)
+
+            # response = HTTParty.post(ENV['SR_URL'] + "/api/v1/assessments/import",
+            response = HTTParty.post("https://republic.sandbox.schoolrunner.org" + "/api/v1/assessments/import",
                                     :body => {
                                         :assessment_data => quiz_data.to_json
                                     },
