@@ -21,8 +21,12 @@ end
 def compile_submission_answers(submission, quiz)
     quiz.root_entries.each_with_index.map { |question, index|
         answer = ''
-        question_answer = submission[:submission_data].find {|answer| answer[:question_id] == question[:id]}
+        question_answer = submission[:submission_data].find { |answer|
+            answer[:question_id] == question[:id]
+        }
+
         answered_question = submission[:quiz_data][index]
+
         if question_answer && question_answer.key?(:answer_id)
             if question[:question_type] == 'multiple_choice_question'
                 answer = char_from_answer_index(answered_question[:answers].index {|answer| answer[:id] == question_answer[:answer_id] })
@@ -132,7 +136,8 @@ namespace :sr do
         assessment_groups = {}
         # quizzes = Quizzes::Quiz.where.not(published_at: nil)
         #                        .where.not(workflow_state: 'deleted')
-        quizzes = Quizzes::Quiz.find([27, 28])
+        # quizzes = Quizzes::Quiz.find([27, 28])
+        quizzes = Quizzes::Quiz.find([36]) #Mock Maap
         for quiz in quizzes do
             quiz_data = quiz_sr_api_data(quiz)
 
@@ -146,6 +151,7 @@ namespace :sr do
                                     :basic_auth => {:username=>"984fc9c37dee56a4ee2e5f74ae891ec62423926b", :password=>""})
 
             json_response = JSON.parse(response.body)
+            puts('JSON RESPONSE:', json_response)
             if json_response['success']
                 assessment_id = json_response['results']['import_0']['assessment_definition']['assessment_id']
                 quiz[:sr_id] = assessment_id
